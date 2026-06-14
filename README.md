@@ -243,3 +243,37 @@ run.bat           double-click launcher for the web app
 
 Every front-end is a thin layer over `engine` + `render` — to add one (web UI,
 Discord bot), import them and call them; never reimplement the logic.
+
+---
+
+## Credits & data sources
+
+windroute runs entirely on free and open data. **If you share or host it, please
+keep these attributions** — a couple are required by license:
+
+- **Routing** — [OpenRouteService](https://openrouteservice.org/) by
+  [HeiGIT](https://heigit.org/), which is built on OpenStreetMap data.
+- **Wind & geocoding** — [Open-Meteo](https://open-meteo.com/). Open-Meteo data is
+  licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), so this credit
+  is **required**: *Weather data by [Open-Meteo.com](https://open-meteo.com/).*
+- **Wind fallback (US)** — the U.S. [National Weather Service](https://www.weather.gov/)
+  (`api.weather.gov`); public-domain, used when Open-Meteo is unavailable.
+- **Maps, geocoding & surface data** — © [OpenStreetMap](https://www.openstreetmap.org/copyright)
+  contributors, licensed under the [ODbL](https://opendatacommons.org/licenses/odbl/).
+  Accessed via [Nominatim](https://nominatim.org/) (address geocoding) and the
+  [Overpass API](https://overpass-api.de/) (surface / bike-lane / farmland tags).
+- **Basemap tiles** in the route images — © OpenStreetMap contributors, served from the
+  OpenStreetMap [tile servers](https://operations.osmfoundation.org/policies/tiles/)
+  (light personal use only; don't point a busy public deployment at them).
+- **Trip history** — the [Ride with GPS](https://ridewithgps.com/) API, used by the
+  `learn` command on your own recorded rides.
+
+Built with Python and [Flask](https://flask.palletsprojects.com/),
+[staticmap](https://github.com/komoot/staticmap), [Pillow](https://python-pillow.org/),
+[requests](https://requests.readthedocs.io/), [Typer](https://typer.tiangolo.com/),
+[Rich](https://github.com/Textualize/rich), and [waitress](https://github.com/Pylons/waitress).
+
+> **Note:** OpenStreetMap and CC BY 4.0 both expect the attribution to be *visible to
+> people viewing the maps*, not only in this README. If you keep the app hosted for
+> others, add a small "© OpenStreetMap contributors · Weather by Open-Meteo.com" line
+> on the page and/or the route images.

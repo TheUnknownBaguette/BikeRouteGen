@@ -80,6 +80,16 @@ def render_map(candidate, wind, meta, path, size=(820, 820), tile_url=None):
     )
 
     _draw_wind_compass(draw, w - 62, 58, 30, wind.direction_from_deg)
+
+    # Attribution, bottom-right of the map (OSM tile policy requires visible credit;
+    # weather sources credited too). Drawn over a small white plate for legibility.
+    cred = "© OpenStreetMap contributors  ·  wind: Open-Meteo.com / weather.gov"
+    tb = draw.textbbox((0, 0), cred, font=small)
+    tw, th = tb[2] - tb[0], tb[3] - tb[1]
+    x0, y0 = w - tw - 12, h + banner_h - th - 10
+    draw.rectangle([x0 - 5, y0 - 4, w - 2, h + banner_h - 2], fill="#ffffff")
+    draw.text((x0, y0), cred, fill="#444444", font=small)
+
     canvas.save(path)
     return path
 
