@@ -138,14 +138,20 @@ def download(name):
     return send_from_directory(OUT_DIR, name, as_attachment=True)
 
 
-def _open_browser():
+def _open_browser(port):
     import webbrowser
-    webbrowser.open("http://127.0.0.1:5000")
+    webbrowser.open(f"http://127.0.0.1:{port}")
 
 
 if __name__ == "__main__":
     import threading
-    # Open the browser a beat after the server starts (debug/reloader OFF so this
-    # fires exactly once).
-    threading.Timer(1.0, _open_browser).start()
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    # HOST/PORT come from the environment so this one file runs both ways:
+    #   - locally (defaults to 127.0.0.1:5000 and pops your browser), and
+    #   - on your own box later (set HOST=0.0.0.0 to expose it on your network).
+    # A hosted free service instead runs a production server (see Procfile:
+    # `waitress-serve webapp:app`), which imports `app` and never reaches this block.
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "5000"))
+    if host in ("127.0.0.1", "localhost"):           # local dev convenience
+        threading.Timer(1.0, lambda: _open_browser(port)).start()
+    app.run(host=host, port=port, debug=False)

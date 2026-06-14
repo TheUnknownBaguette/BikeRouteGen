@@ -55,7 +55,18 @@ Full setup + every option is in `README.md`.
 **Local web app (no terminal):** `python webapp.py` (or double-click `run.bat`) starts
 a Flask server on `127.0.0.1:5000` and opens a browser; a form runs `plan_routes` and
 shows the recommendation + 2 alternatives with inline maps + GPX downloads. Maps/GPX
-are written to `static/out/` (gitignored, swept after 1 h). Local-only; reads `ORS_API_KEY`.
+are written to `static/out/` (gitignored, swept after 1 h). `webapp.py` reads `HOST`/
+`PORT` from the env (default local), so the same file serves locally and on a server.
+
+**Hosting / future self-host (so friends need no key):** `Procfile` runs `waitress`
+(cross-platform prod server, in requirements) via `waitress-serve --listen=*:$PORT
+webapp:app`. CURRENT: hosted on a free service (e.g. Render) — connect the repo, that
+start command, and set `ORS_API_KEY` as a server SECRET (never in the public repo).
+FUTURE self-host (owner wants their own mini server eventually, doesn't have one yet,
+2026-06): the SAME `waitress-serve` command runs on any box (Windows/Linux/Pi) — set
+`ORS_API_KEY` in that machine's env, open the port, done. No code changes; the env-
+driven HOST/PORT + waitress are the provisions for it. Watch the ORS free-tier limit
+(~2000 calls/day, ~12-15 per plan) — a paid key or self-hosted ORS if it grows.
 
 ## Architecture / file map
 

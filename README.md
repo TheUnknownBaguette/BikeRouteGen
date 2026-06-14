@@ -83,6 +83,44 @@ It runs only on your own machine (`127.0.0.1`, not exposed to your network) and 
 > Same engine underneath — the web app and the CLI both call `windroute.planner`, so
 > they always agree.
 
+## Share it with friends (free hosting)
+
+Host the web app once and your friends just open a link — no install, no API key,
+no commands on their end. Your key stays a server-side secret.
+
+On a free host like [Render](https://render.com):
+
+1. Make sure your code is pushed to GitHub.
+2. Create a new **Web Service** and connect this repo.
+3. **Build command:** `pip install -r requirements.txt`
+   **Start command:** `waitress-serve --listen=*:$PORT webapp:app`
+4. Add an environment variable **`ORS_API_KEY`** = your key (mark it secret).
+5. Deploy, then share the service URL.
+
+`waitress` (in `requirements.txt`) is the production server; `webapp.py` reads the
+host/port from the environment, so nothing in the code changes between local and
+hosted. The same `waitress-serve --listen=*:$PORT webapp:app` runs on your own
+server later (see below).
+
+> **Never commit your API key** — the repo is public, so a committed key gets
+> scraped and revoked. Keep it in the host's secret env var only.
+>
+> **Limits:** the OpenRouteService free tier is ~2,000 routing calls/day and one
+> plan uses ~12–15, so it's good for a handful of friends (~130 plans/day shared),
+> not a public launch. Free hosts also sleep after idle, so the first request after
+> a quiet spell can take ~a minute to wake.
+
+### Self-hosting later (your own box)
+
+When you have your own server, run the exact same command there — `waitress` is
+cross-platform (Windows/Linux/Pi):
+
+```bash
+ORS_API_KEY=your_key  PORT=5000  HOST=0.0.0.0  waitress-serve --listen=*:5000 webapp:app
+```
+
+Set `ORS_API_KEY` in that machine's environment and open the port; no code changes.
+
 ## Everyday use (PowerShell)
 
 Prefer the terminal? Once setup is done, a normal session is just two steps:
