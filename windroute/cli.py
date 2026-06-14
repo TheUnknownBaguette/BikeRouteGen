@@ -635,7 +635,6 @@ def _parse_latlng(s: str):
 
 
 def _wind_panel(wind, label, when):
-    arrow = "\u2191\u2192\u2193\u2190"  # decorative
     body = (f"[bold]{label}[/]   {when:%a %b %d, %H:%M}\n"
             f"Wind from [bold]{engine.compass_label(wind.direction_from_deg)}[/] "
             f"({wind.direction_from_deg:.0f}\u00b0) at "

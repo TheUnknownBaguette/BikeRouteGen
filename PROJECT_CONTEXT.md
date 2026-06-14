@@ -71,7 +71,7 @@ windroute/
   render.py       map image + GPX output
   cli.py          CLI front-end: plan / mark / roads-import / corrections / forget / rwgps-login / import / learn
 webapp.py         local web front-end (Flask); templates/ has the HTML; run.bat launches it
-discord_bot.py    optional Discord front-end (imports windroute; not wired to CLI)
+discord_bot.py    optional Discord front-end (thin over planner.plan_routes; needs discord.py; not wired in)
 README.md         user-facing setup + usage
 requirements.txt  deps
 ```
