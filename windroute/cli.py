@@ -20,7 +20,8 @@ from rich.table import Table
 from rich.text import Text
 
 from . import engine, render, surface, zones, rwgps, learn
-from .corrections import CorrectionCache, parse_gpx, downsample
+from .corrections import (CorrectionCache, parse_gpx, downsample,
+                          parse_road_notes, ROAD_NOTES_TEMPLATE)
 
 # Windows consoles default stdout to cp1252, which raises UnicodeEncodeError on
 # the box-drawing / maths / symbol glyphs rich emits (tables, ⚠, ≤, …). Force
@@ -289,6 +290,105 @@ def forget(
     else:
         console.print(f"[yellow]No correction matched[/] {key!r}. "
                       f"Run 'corrections' to see the list.")
+        raise typer.Exit(code=1)
+
+
+@app.command(name="roads-import")
+def roads_import(
+    file: str = typer.Argument(
+        "road-notes.txt",
+        help="Road-notes text file. If it doesn't exist, a template is created."),
+    radius: float = typer.Option(40.0, "--radius",
+                                 help="Match radius in metres for each road."),
+    ride_type: str = typer.Option("road", "--ride-type", "-r",
+                                  help="Routing profile used to trace each A->B road."),
+    append: bool = typer.Option(
+        False, "--append",
+        help="Keep notes previously imported from this file instead of re-syncing "
+             "(default replaces this file's prior imports so the file stays the "
+             "source of truth)."),
+    corrections_file: str = typer.Option(None, "--corrections-file"),
+    api_key: str = typer.Option(None, "--api-key", envvar="ORS_API_KEY"),
+):
+    """Bulk-import road notes (gravel / busy / quiet / paved) from a text file.
+
+    Each line is `<tags>: <A> -> <B>` — e.g. `gravel: Manhattan, IL -> Symerton, IL`.
+    Endpoints are geocoded and the road between them is traced and added to your
+    personal correction cache, so every future `plan` knows about it. Re-run after
+    editing the file; by default it re-syncs (replaces this file's earlier import).
+    """
+    path = Path(file)
+    if not path.exists():
+        path.write_text(ROAD_NOTES_TEMPLATE, encoding="utf-8")
+        console.print(Panel.fit(
+            Text.from_markup(
+                f"[green]Created a road-notes template[/] at [bold]{path}[/].\n"
+                f"Open it, add your roads (one per line), then run "
+                f"[bold]roads-import {file}[/] again."),
+            title="[bold cyan]Edit this, then re-run", border_style="cyan"))
+        return
+
+    try:
+        entries, errors = parse_road_notes(path.read_text(encoding="utf-8"))
+        for ln, txt, why in errors:
+            console.print(f"[yellow]line {ln}:[/] {why} — [dim]{txt}[/]")
+        if not entries:
+            console.print(Panel("No usable road lines found. Each line must read "
+                                "`<tags>: <A> -> <B>`.", title="[bold yellow]Nothing to import",
+                                border_style="yellow"))
+            raise typer.Exit(code=1)
+
+        cache = CorrectionCache.load(corrections_file)
+        origin = str(path.resolve())
+        removed = 0
+        if not append:
+            before = len(cache.records)
+            cache.records = [r for r in cache.records
+                             if not (r.get("source") == "roads-import"
+                                     and r.get("origin") == origin)]
+            removed = before - len(cache.records)
+
+        profile = engine.PROFILE_BY_RIDE.get(ride_type.lower().strip(), "cycling-regular")
+        added = 0
+        failed = []
+        with Progress(console=console, transient=True) as prog:
+            task = prog.add_task("Tracing roads", total=len(entries))
+            for e in entries:
+                try:
+                    lat1, lng1, _l1 = engine.geocode(e["a"])
+                    lat2, lng2, _l2 = engine.geocode(e["b"])
+                    road, *_rest = engine._ors_directions(
+                        api_key, profile, [[lng1, lat1], [lng2, lat2]], timeout=40)
+                    coords = downsample(road)
+                    if not coords:
+                        raise ValueError("no route between those endpoints")
+                    rec = cache.add(coords, surface=e["surface"], traffic=e["traffic"],
+                                    radius_m=radius, note=e["raw"])
+                    rec["source"] = "roads-import"
+                    rec["origin"] = origin
+                    added += 1
+                except Exception as exc:                  # geocode / routing failure
+                    failed.append((e, str(exc)))
+                prog.advance(task)
+                time.sleep(0.3)                           # polite API pacing
+
+        cache.save()
+        for e, why in failed:
+            console.print(f"[red]line {e['line']}:[/] couldn't trace — {why} "
+                          f"[dim]{e['raw']}[/]")
+        msg = f"[green]Imported {added} road note(s)[/] into [dim]{cache.path}[/]"
+        if removed:
+            msg += f"\nReplaced {removed} earlier note(s) from this file (use --append to keep)."
+        if failed:
+            msg += (f"\n[yellow]{len(failed)} line(s) failed[/] — usually a place that "
+                    f"didn't geocode; try an address or lat,lng pin.")
+        msg += "\nThey're applied on top of the surface data on every plan."
+        console.print(Panel.fit(Text.from_markup(msg), title="[bold green]Done",
+                                border_style="green"))
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        console.print(Panel(str(exc), title="[bold red]Error", border_style="red"))
         raise typer.Exit(code=1)
 
 

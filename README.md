@@ -133,6 +133,29 @@ python -m windroute.cli corrections        # list what's on file
 python -m windroute.cli forget 2           # delete by number or label
 ```
 
+**Bulk notes from a text file.** Instead of one `mark` at a time, keep a plain-text
+list of roads and import it in one go:
+
+```powershell
+# Creates road-notes.txt (a commented template) if it doesn't exist yet
+python -m windroute.cli roads-import road-notes.txt
+```
+
+Edit the file — one road per line, `<tags>: <A> -> <B>` — then run it again:
+
+```text
+# road-notes.txt
+gravel: Manhattan, IL -> Symerton, IL
+busy:   41.605,-87.861 -> 41.585,-87.861
+gravel, quiet: 19150 88th Ave, Mokena, IL -> Frankfort, IL
+```
+
+Tags are `gravel`, `paved`, `busy`, `quiet` (combine with commas). Each line's two
+endpoints are geocoded and the road between them is traced into your correction
+cache. Pick endpoints *on* the road (addresses or `lat,lng` pins are most reliable).
+Re-running re-syncs the file (replaces its earlier import); pass `--append` to keep
+old entries.
+
 ---
 
 ## Honest limitations

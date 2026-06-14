@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -25,6 +26,84 @@ from .surface import _haversine_km, _pt_seg_dist_m
 DEFAULT_RADIUS_M = 40.0
 SURFACE_VALUES = ("paved", "unpaved")
 TRAFFIC_VALUES = ("quiet", "busy")
+
+# Plain-language tags you can type in a road-notes file -> (kind, value). "gravel"
+# is the friendly synonym for unpaved; tags combine ("gravel, busy: A -> B").
+ROAD_NOTE_TAGS = {
+    "gravel": ("surface", "unpaved"),
+    "unpaved": ("surface", "unpaved"),
+    "paved": ("surface", "paved"),
+    "busy": ("traffic", "busy"),
+    "quiet": ("traffic", "quiet"),
+}
+
+ROAD_NOTES_TEMPLATE = """\
+# windroute road notes — your personal ground truth about local roads.
+# Edit this file, then run:  python -m windroute.cli roads-import road-notes.txt
+#
+# One road per line:   <tags>: <A> -> <B>
+#   tags      gravel | paved | busy | quiet   (combine with commas: "gravel, quiet:")
+#   A, B      two points ON the road: a town, a street address, or lat,lng pins.
+#             Pick endpoints that force the route onto the road you mean (close
+#             cross-streets or dropped pins are most reliable).
+# Lines starting with # are ignored. Re-running re-syncs this file's notes.
+#
+# examples (delete and replace with your own):
+# gravel: Manhattan, IL -> Symerton, IL
+# busy: 41.605,-87.861 -> 41.585,-87.861
+# gravel, quiet: 19150 88th Ave, Mokena, IL -> Frankfort, IL
+"""
+
+
+def _split_endpoints(s: str):
+    """Split an 'A -> B' road spec into (A, B), or (None, None) if it isn't one."""
+    for sep in ("->", "→", " to "):           # arrow, unicode arrow, or " to "
+        if sep in s:
+            parts = s.split(sep)
+            if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+                return parts[0].strip(), parts[1].strip()
+            return None, None
+    return None, None
+
+
+def parse_road_notes(text: str):
+    """Parse a road-notes file body into correction specs. PURE — no geocoding or
+    routing here (the CLI does that), so this is trivially testable.
+
+    Returns (entries, errors). Each entry is a dict with keys: surface, traffic
+    (one may be None), a, b (the two endpoint strings to geocode), raw (the source
+    line), line (1-based number). `errors` is a list of (line_no, text, reason).
+    """
+    entries, errors = [], []
+    for i, raw in enumerate(text.splitlines(), 1):
+        line = raw.split("#", 1)[0].strip()           # drop inline / whole-line comments
+        if not line:
+            continue
+        if ":" not in line:
+            errors.append((i, raw.strip(), "missing ':' between the tags and the road"))
+            continue
+        tags_part, road_part = line.split(":", 1)
+        tags = [t for t in re.split(r"[,\s]+", tags_part.strip().lower()) if t]
+        unknown = [t for t in tags if t not in ROAD_NOTE_TAGS]
+        if not tags or unknown:
+            errors.append((i, raw.strip(),
+                           f"unknown tag(s): {', '.join(unknown)}" if unknown
+                           else "no tag before the ':'"))
+            continue
+        surface = traffic = None
+        for t in tags:
+            kind, val = ROAD_NOTE_TAGS[t]
+            if kind == "surface":
+                surface = val
+            else:
+                traffic = val
+        a, b = _split_endpoints(road_part)
+        if not a or not b:
+            errors.append((i, raw.strip(), "expected two endpoints: 'A -> B'"))
+            continue
+        entries.append({"surface": surface, "traffic": traffic,
+                        "a": a, "b": b, "raw": raw.strip(), "line": i})
+    return entries, errors
 
 
 def default_path() -> Path:

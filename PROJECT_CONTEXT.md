@@ -63,7 +63,7 @@ windroute/
   rwgps.py        Ride with GPS v1 API client (auth, list/fetch trips, trip cache, creds)
   learn.py        analyse imported trips -> rider profile + suggested weight changes (pure)
   render.py       map image + GPX output
-  cli.py          CLI: plan / mark / corrections / forget / rwgps-login / import / learn
+  cli.py          CLI: plan / mark / roads-import / corrections / forget / rwgps-login / import / learn
 discord_bot.py    optional Discord front-end (imports windroute; not wired to CLI)
 README.md         user-facing setup + usage
 requirements.txt  deps
@@ -129,6 +129,18 @@ requirements.txt  deps
 - **Corrections cache** (`mark` / `corrections` / `forget`): record personal ground
   truth (a road is really gravel / really busy) via GPX, points, or `--between`/`--to`;
   applied on top of surface data on every plan.
+- **Road-notes bulk import** (`roads-import <file>`): edit a plain-text file of roads
+  (`<tags>: A -> B`, tags = gravel|paved|busy|quiet, combinable) and import them all into
+  the correction cache at once — the ergonomic front door to `mark`. `corrections.parse_road_notes`
+  is the pure parser (returns entries + per-line errors); the CLI geocodes each endpoint pair,
+  routes A->B (same path as `mark --between/--to`), and adds it. Missing file -> writes a
+  commented template (`ROAD_NOTES_TEMPLATE`). Imported records carry `source="roads-import"` +
+  `origin=<file>` so re-running RE-SYNCS that file (replaces its prior entries; `--append` keeps
+  them). Key gotcha: a line gives two ENDPOINTS, not a road name — the trace follows whatever
+  ORS routes between them, so pick close endpoints on the road (addresses / `lat,lng` pins;
+  bare road names geocode unreliably). Penalty scales with distance ridden ALONG a marked
+  road, so merely CROSSING a marked gravel road costs ~nothing (~84 m flagged at the 40 m
+  match radius = ~0.18% of a 48 km ride).
 - **Exact start point:** `geocode()` dispatches over (1) `lat,lng` decimal, (2) DMS
   from Google Maps (`41°31'36.3"N 87°52'18.0"W`), (3) street address (Nominatim),
   (4) town / "City, ST" (Open-Meteo).
