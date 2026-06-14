@@ -146,8 +146,8 @@ def geocode(place: str):
 
     try:
         return _geocode_openmeteo(place)
-    except ValueError:
-        return _geocode_nominatim(place)           # last resort for odd names
+    except (ValueError, requests.RequestException):
+        return _geocode_nominatim(place)           # odd names, or Open-Meteo rate-limited
 
 
 def _parse_coords(place: str):
@@ -255,7 +255,21 @@ def _geocode_nominatim(place: str):
 
 
 def get_wind(lat: float, lng: float, when: dt.datetime) -> Wind:
-    """Wind forecast for the hour nearest `when` (naive local time)."""
+    """Wind forecast for the hour nearest `when` (naive local time).
+
+    Open-Meteo is the primary source (free, no key, worldwide). If it fails — most
+    notably HTTP 429 when running from a shared cloud IP that Open-Meteo throttles
+    (e.g. a free hosting tier) — fall back to the US National Weather Service
+    (`api.weather.gov`, keyless, US-only). Locally Open-Meteo just works and NWS is
+    never touched.
+    """
+    try:
+        return _wind_from_open_meteo(lat, lng, when)
+    except requests.RequestException:
+        return _wind_from_nws(lat, lng, when)
+
+
+def _wind_from_open_meteo(lat: float, lng: float, when: dt.datetime) -> Wind:
     r = requests.get(
         FORECAST_URL,
         params={
@@ -277,6 +291,58 @@ def get_wind(lat: float, lng: float, when: dt.datetime) -> Wind:
         gust_mph=float(h["wind_gusts_10m"][idx]),
         valid_time=h["time"][idx],
     )
+
+
+def _wind_from_nws(lat: float, lng: float, when: dt.datetime) -> Wind:
+    """US National Weather Service hourly wind (keyless, US-only).
+
+    Two calls: /points/{lat},{lng} gives the hourly-forecast URL, then that URL
+    returns hourly periods with windSpeed ('10 mph' / '5 to 10 mph') and
+    windDirection (a compass label). NWS requires a descriptive User-Agent and
+    only covers US locations (a point outside the US 404s).
+    """
+    headers = {"User-Agent": USER_AGENT, "Accept": "application/geo+json"}
+    pt = requests.get(f"https://api.weather.gov/points/{lat:.4f},{lng:.4f}",
+                      headers=headers, timeout=20)
+    pt.raise_for_status()
+    hourly_url = pt.json()["properties"]["forecastHourly"]
+    fc = requests.get(hourly_url, headers=headers, timeout=20)
+    fc.raise_for_status()
+    periods = fc.json().get("properties", {}).get("periods") or []
+    if not periods:
+        raise ValueError("NWS returned no forecast periods for this location")
+
+    target = when.replace(minute=0, second=0, microsecond=0)
+    best, best_diff = None, None
+    for per in periods:
+        t = dt.datetime.fromisoformat(per["startTime"]).replace(tzinfo=None)
+        diff = abs((t - target).total_seconds())
+        if best_diff is None or diff < best_diff:
+            best_diff, best = diff, per
+    return Wind(
+        direction_from_deg=_compass_to_deg(best.get("windDirection")),
+        speed_mph=_parse_mph(best.get("windSpeed")),
+        gust_mph=_parse_mph(best.get("windGust")),
+        valid_time=str(best.get("startTime", ""))[:16],   # 'YYYY-MM-DDTHH:MM'
+    )
+
+
+def _compass_to_deg(label) -> float:
+    """A 16-point compass label ('SSW') -> degrees the wind comes FROM (0=N)."""
+    if not label:
+        return 0.0
+    try:
+        return COMPASS_16.index(str(label).strip().upper()) * 22.5
+    except ValueError:
+        return 0.0
+
+
+def _parse_mph(text) -> float:
+    """Pull a speed out of an NWS string like '10 mph' or '5 to 10 mph' (-> 10)."""
+    if not text:
+        return 0.0
+    nums = re.findall(r"\d+(?:\.\d+)?", str(text))
+    return max(float(n) for n in nums) if nums else 0.0
 
 
 def get_wind_historical(lat: float, lng: float, when: dt.datetime) -> Wind:
