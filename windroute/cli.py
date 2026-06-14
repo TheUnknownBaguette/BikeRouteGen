@@ -19,7 +19,8 @@ from rich.progress import Progress
 from rich.table import Table
 from rich.text import Text
 
-from . import engine, render, surface, zones, rwgps, learn
+from . import engine, render, surface, rwgps, learn, planner
+from .planner import SURFACE_DISAGREE
 from .corrections import (CorrectionCache, parse_gpx, downsample,
                           parse_road_notes, ROAD_NOTES_TEMPLATE)
 
@@ -92,53 +93,23 @@ def plan(
 ):
     """Plan a route, rank candidates by wind + surface, write image + GPX."""
     ride_type = ride_type.lower().strip()
-    shape_list = [s.strip().lower() for s in shapes.split(",") if s.strip()]
-    to_km = 1.609344 if unit.lower().startswith("mi") else 1.0
-    target_km = distance * to_km
-    tolerance_km = tolerance * to_km
-    when = (dt.datetime.now().replace(minute=0, second=0, microsecond=0)
-            if start.lower() == "now" else dateparser.parse(start))
-
     try:
-        with console.status("[cyan]Geocoding location\u2026"):
-            lat, lng, label = engine.geocode(location)
+        with console.status("[cyan]Planning your route (wind, candidates, scoring)\u2026"):
+            result = planner.plan_routes(
+                location=location, distance=distance, unit=unit, start=start,
+                ride_type=ride_type, shapes=shapes, surface_source=surface_source,
+                ride_area=ride_area, tolerance=tolerance, candidates=candidates,
+                corrections=corrections, corrections_file=corrections_file,
+                api_key=api_key, n_alternatives=2)
 
-        with console.status("[cyan]Fetching wind for your ride window\u2026"):
-            wind = engine.get_wind(lat, lng, when)
+        wind, label, when = result.wind, result.location_label, result.when
+        mode = result.surface_mode
+        ranked, options = result.ranked, result.options
+        best = options[0].candidate
 
         console.print(_wind_panel(wind, label, when))
-
-        zone = None
-        if ride_area:
-            zone = _resolve_ride_area(ride_area, lat, lng, target_km)
-            if zone:
-                shape_list = shape_list + ["staging"]
-
-        with console.status(f"[cyan]Generating {candidates} candidate routes\u2026"):
-            cands = engine.generate_candidates(
-                lat, lng, target_km, ride_type, api_key, n=candidates,
-                shapes=shape_list, into_wind_bearing=wind.into_wind_bearing,
-                zone=zone)
-
-        mode = surface_source.lower()
-        if mode == "osm":
-            with console.status("[cyan]Refining surface from OpenStreetMap\u2026"):
-                note = _apply_osm_surface(cands)
+        for note in result.notes:
             console.print(f"[dim]{note}[/]")
-        elif mode == "both":
-            with console.status("[cyan]Cross-checking surface (ORS vs OSM)\u2026"):
-                note = _compare_surface(cands)
-            console.print(f"[dim]{note}[/]")
-
-        if corrections:
-            note = _apply_corrections(cands, corrections_file)
-            if note:
-                console.print(f"[dim]{note}[/]")
-
-        ranked = engine.evaluate(cands, wind, ride_type, target_km, tolerance_km)
-        options = engine.select_route_options(ranked, wind, ride_type, target_km,
-                                              n_alternatives=2)
-        best = options[0].candidate
 
         console.print(_candidates_table(ranked, ride_type, compare=(mode == "both"),
                                          show_lane=(mode in ("osm", "both"))))
@@ -655,146 +626,12 @@ def _print_profile(p):
                       f"{', '.join(p['dominant_sectors'])}[/]")
 
 
-def _resolve_ride_area(ride_area, lat, lng, target_km):
-    """Turn the --ride-area flag into a staging zone dict, or None.
-
-    'auto' auto-detects the nearest good quiet riding zone from the start; any
-    other value is geocoded and used as a forced zone. Either way the zone is
-    rejected (with a note) if it's so far that the round-trip transit would eat
-    most of the ride budget — we want most of the distance spent looping in good
-    country, not commuting to it (cap: 2*crow-transit <= 0.6*target).
-    """
-    max_transit_oneway = 0.3 * target_km
-    area = ride_area.strip()
-    if area.lower() == "auto":
-        with console.status("[cyan]Scouting for a good quiet riding zone…"):
-            zone = zones.find_ride_zone(lat, lng)
-        if not zone:
-            console.print("[dim]ride-area: you're already in good riding country "
-                          "(or nothing stands out within range) — riding from the "
-                          "start.[/]")
-            return None
-        bearing = zone["bearing"]
-        dist = zone["distance_km"]
-    else:
-        zlat, zlng, zlabel = engine.geocode(area)
-        dist = engine._haversine_km((lat, lng), (zlat, zlng))
-        bearing = engine._bearing((lat, lng), (zlat, zlng))
-        zone = {"lat": zlat, "lng": zlng, "bearing": bearing,
-                "distance_km": dist, "label": zlabel}
-
-    if dist > max_transit_oneway:
-        console.print(
-            f"[dim]ride-area: the {engine.compass_label(bearing)} zone is "
-            f"{dist:.1f} km away — too far for a {target_km:.0f} km ride "
-            f"(transit would dominate). Riding from the start; try a longer "
-            f"distance to stage there.[/]")
-        return None
-
-    target_desc = zone.get("label") or f"{engine.compass_label(bearing)} ({bearing:.0f}°)"
-    console.print(f"[dim]ride-area: staging toward {target_desc}, "
-                  f"~{dist:.1f} km out; the destination loop is wind-scored.[/]")
-    return zone
-
-
 def _parse_latlng(s: str):
     """'41.79,-86.74' -> (41.79, -86.74)."""
     parts = s.replace(" ", "").split(",")
     if len(parts) != 2:
         raise ValueError(f"Bad --point {s!r}; expected 'lat,lng'.")
     return float(parts[0]), float(parts[1])
-
-
-def _apply_osm_surface(cands):
-    """Override each candidate's paved/unpaved fractions with OSM/Overpass data.
-
-    One Overpass query covers all candidates. On any failure we leave the ORS
-    baseline untouched and say so, rather than aborting the whole plan.
-    """
-    try:
-        src = surface.OverpassSurface().build([c.coords for c in cands])
-    except Exception as exc:                              # network / Overpass down
-        return f"surface: OSM lookup failed ({exc}); kept ORS surface"
-    if not src.way_count and not src.bikelane_count:
-        return "surface: no OSM surface tags in this area; kept ORS surface"
-    refined = lanes = 0
-    for c in cands:
-        res = src.classify(c.coords)
-        if res:
-            c.paved_frac, c.unpaved_frac = res
-            refined += 1
-        lane = src.classify_bikelane(c.coords)
-        if lane is not None:
-            c.bikelane_frac = lane
-            if lane > 0:
-                lanes += 1
-    return (f"surface: OSM/Overpass ({src.way_count} tagged ways, "
-            f"{refined}/{len(cands)} loops refined; "
-            f"{src.bikelane_count} bike-lane ways, {lanes} routes use one)")
-
-
-def _apply_corrections(cands, corrections_file):
-    """Overlay the personal correction cache on every candidate.
-
-    Silent (returns "") when the cache is empty or none of the routes touch a
-    marked road, so it never nags when there's nothing to say.
-    """
-    cache = CorrectionCache.load(corrections_file)
-    if not cache.records:
-        return ""
-    cache.build()
-    touched = 0
-    surf_km = traf_km = 0.0
-    for c in cands:
-        s, t = cache.apply(c)
-        if s or t:
-            touched += 1
-        surf_km += s
-        traf_km += t
-    if not touched:
-        return (f"corrections: {len(cache.records)} on file, "
-                f"none on these routes")
-    return (f"corrections: applied {len(cache.records)} personal note(s) - "
-            f"{touched}/{len(cands)} routes adjusted "
-            f"({surf_km:.1f} km surface, {traf_km:.1f} km traffic)")
-
-
-SURFACE_DISAGREE = 0.10   # |ORS unpaved - OSM unpaved| above this -> flag (⚠)
-
-
-def _compare_surface(cands):
-    """Cross-check ORS vs OSM surface for each route.
-
-    Records both readings on every candidate (surface_by_source['ors'/'osm']),
-    flags routes where they disagree by more than SURFACE_DISAGREE, and adopts
-    the finer OSM value as the one used for scoring. On Overpass failure the ORS
-    baseline is kept untouched.
-    """
-    for c in cands:
-        c.surface_by_source["ors"] = c.unpaved_frac     # current value is ORS baseline
-    try:
-        src = surface.OverpassSurface().build([c.coords for c in cands])
-    except Exception as exc:                             # network / Overpass down
-        return f"surface cross-check: OSM lookup failed ({exc}); kept ORS only"
-    if not src.way_count and not src.bikelane_count:
-        return "surface cross-check: no OSM surface tags in this area; kept ORS only"
-
-    disagree = 0
-    for c in cands:
-        lane = src.classify_bikelane(c.coords)
-        if lane is not None:
-            c.bikelane_frac = lane
-        res = src.classify(c.coords)
-        if not res:
-            continue
-        paved, unpaved = res
-        c.surface_by_source["osm"] = unpaved
-        c.paved_frac, c.unpaved_frac = paved, unpaved    # OSM is primary for scoring
-        if abs(unpaved - c.surface_by_source["ors"]) > SURFACE_DISAGREE:
-            disagree += 1
-    return (f"surface cross-check: ORS vs OSM over {src.way_count} tagged ways; "
-            f"{disagree}/{len(cands)} routes disagree >{SURFACE_DISAGREE*100:.0f}% "
-            f"(scoring uses OSM)")
 
 
 def _wind_panel(wind, label, when):

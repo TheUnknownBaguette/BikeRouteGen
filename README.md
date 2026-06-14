@@ -66,9 +66,26 @@ picks it up automatically** — you don't set it again.
 
 ---
 
+## Easiest: the local web app (no terminal)
+
+After the one-time setup above, you can skip PowerShell entirely:
+
+**Double-click `run.bat`.** It starts a local server and opens your browser to
+`http://127.0.0.1:5000`. Fill in the form (start point, distance, time, ride type —
+plus an "advanced" block for shapes, surface source, ride-area staging), hit **Plan
+my routes**, and you get the recommended route plus two alternatives, each with its
+map shown inline and a GPX download button. A plan takes ~20–40 s (it's calling the
+routing + wind services, same as the CLI).
+
+It runs only on your own machine (`127.0.0.1`, not exposed to your network) and reads
+`ORS_API_KEY` just like the CLI. To stop it, close the terminal window it opened.
+
+> Same engine underneath — the web app and the CLI both call `windroute.planner`, so
+> they always agree.
+
 ## Everyday use (PowerShell)
 
-Once setup is done, a normal session is just two steps:
+Prefer the terminal? Once setup is done, a normal session is just two steps:
 
 ```powershell
 # 1. Activate the environment
@@ -176,11 +193,14 @@ old entries.
 ```
 windroute/
   engine.py       core: geocode, wind, route generation + shapes, scoring (no I/O)
+  planner.py      the shared planning pipeline both front-ends call (plan_routes)
   zones.py        auto-detect the nearest quiet riding zone (for --ride-area)
   surface.py      OpenStreetMap/Overpass surface + bike-lane source
-  corrections.py  the personal "I rode this" correction cache
+  corrections.py  the personal "I rode this" correction cache + road-notes parser
   render.py       map image + GPX output
   cli.py          the CLI wrapper (typer + rich)
+webapp.py         the local web front-end (Flask) + templates/
+run.bat           double-click launcher for the web app
 ```
 
 Every front-end is a thin layer over `engine` + `render` — to add one (web UI,

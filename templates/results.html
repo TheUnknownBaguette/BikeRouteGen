@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}windroute — {{ label }}{% endblock %}
+{% block sub %}{{ label }} · {{ wind.when }}{% endblock %}
+{% block content %}
+  <div class="card" style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap">
+    <div>
+      <strong>Wind from {{ wind.from }}</strong> ({{ '%.0f'|format(wind.deg) }}°)
+      at {{ '%.0f'|format(wind.mph) }} mph, gusting {{ '%.0f'|format(wind.gust) }}.
+      <div class="muted" style="font-size:14px">Ride out toward {{ wind.from }} to take the headwind while fresh.</div>
+    </div>
+    <a class="back" href="/">← Plan another</a>
+  </div>
+
+  {% if notes %}
+    <div class="notes">
+      {% for n in notes %}<div>{{ n }}</div>{% endfor %}
+    </div>
+  {% endif %}
+
+  {% for c in cards %}
+    <div class="card opt">
+      <h3>
+        {% if c.role == 'recommended' %}<span class="badge rec">RECOMMENDED</span>
+        {% else %}<span class="badge alt">OPTION {{ loop.index }}</span>{% endif %}
+        &nbsp;{{ c.headline }}
+      </h3>
+      <img src="{{ url_for('static', filename=c.png) }}" alt="route map">
+      <div class="meta">
+        {{ '%.1f'|format(c.dist_mi) }} mi ({{ '%.1f'|format(c.dist_km) }} km)
+        · +{{ '%.0f'|format(c.ascent_m) }} m · {{ c.verdict }}
+        · {{ c.shape }}{% if c.cross > 2 %} · <span style="color:var(--warn)">{{ c.cross }} self-crossings</span>{% endif %}
+      </div>
+      <ul>{% for r in c.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+      <a class="dl" href="{{ url_for('download', name=c.gpx) }}">⬇ Download GPX</a>
+    </div>
+  {% endfor %}
+
+  <div class="card">
+    <strong>All candidates (ranked)</strong>
+    <table style="margin-top:10px">
+      <thead><tr>
+        <th>#</th><th>Shape</th><th>Wind</th><th>mi</th><th>km</th><th>Climb</th>
+        <th>Gravel%</th><th>Hwy%</th><th>Path%</th><th>Cross</th><th>Score</th>
+      </tr></thead>
+      <tbody>
+      {% for c in ranked %}
+        <tr>
+          <td>{{ loop.index }}</td><td>{{ c.shape }}</td><td class="muted">{{ c.verdict }}</td>
+          <td>{{ '%.1f'|format(c.dist_mi) }}</td><td>{{ '%.1f'|format(c.dist_km) }}</td>
+          <td>{{ '%.0f'|format(c.ascent_m) }}</td>
+          <td>{{ '%.0f'|format(c.gravel_pct) }}</td><td>{{ '%.0f'|format(c.hwy_pct) }}</td>
+          <td>{{ '%.0f'|format(c.path_pct) }}</td><td>{{ c.cross }}</td>
+          <td>{{ '%.2f'|format(c.score) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="muted" style="font-size:12px; margin-top:8px">
+      The three cards above are the picks (recommendation + two alternatives) chosen
+      from these. Re-run with more candidates from the form for a wider search.</div>
+  </div>
+{% endblock %}

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}windroute{% endblock %}</title>
+  <style>
+    :root { --ink:#1b1f24; --dim:#5b6573; --line:#e2e6ea; --accent:#1f6feb;
+            --good:#1a7f37; --warn:#9a6700; --bad:#cf222e; --bg:#f6f8fa; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink);
+           font:16px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+    .wrap { max-width:920px; margin:0 auto; padding:28px 20px 64px; }
+    h1 { font-size:24px; margin:0 0 2px; }
+    h1 a { color:inherit; text-decoration:none; }
+    .sub { color:var(--dim); margin:0 0 24px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:12px;
+            padding:18px 20px; margin:0 0 18px; }
+    label { display:block; font-weight:600; font-size:14px; margin:0 0 4px; }
+    input[type=text], input[type=number], select {
+      width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px;
+      font-size:15px; background:#fff; color:var(--ink); }
+    .row { display:flex; gap:14px; flex-wrap:wrap; }
+    .row > div { flex:1; min-width:150px; margin-bottom:14px; }
+    details { margin-top:6px; }
+    summary { cursor:pointer; font-weight:600; color:var(--accent); margin:6px 0 12px; }
+    .checks { display:flex; flex-wrap:wrap; gap:14px; }
+    .checks label { font-weight:400; display:flex; align-items:center; gap:6px; }
+    .checks input { width:auto; }
+    button { background:var(--accent); color:#fff; border:0; border-radius:9px;
+             padding:12px 22px; font-size:16px; font-weight:600; cursor:pointer; }
+    button:disabled { opacity:.6; cursor:progress; }
+    .err { background:#fff5f5; border:1px solid #ffc9c9; color:var(--bad);
+           padding:12px 14px; border-radius:9px; margin:0 0 18px; }
+    .badge { display:inline-block; font-size:12px; font-weight:700; letter-spacing:.03em;
+             padding:2px 8px; border-radius:999px; vertical-align:middle; }
+    .badge.rec { background:#e6f4ea; color:var(--good); }
+    .badge.alt { background:#e7f0ff; color:var(--accent); }
+    .opt h3 { margin:0 0 8px; font-size:18px; }
+    .opt img { width:100%; border-radius:9px; border:1px solid var(--line); display:block; }
+    .opt .meta { color:var(--dim); font-size:14px; margin:8px 0; }
+    .opt ul { margin:8px 0 12px; padding-left:18px; }
+    .opt li { margin:1px 0; }
+    .dl { display:inline-block; background:var(--good); color:#fff; text-decoration:none;
+          padding:8px 14px; border-radius:8px; font-weight:600; font-size:14px; }
+    .notes { color:var(--dim); font-size:13px; margin:0 0 18px; }
+    .notes div { margin:2px 0; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th,td { text-align:right; padding:6px 8px; border-bottom:1px solid var(--line); }
+    th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align:left; }
+    .muted { color:var(--dim); }
+    a.back { color:var(--accent); text-decoration:none; font-weight:600; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1><a href="/">windroute</a></h1>
+    <p class="sub">{% block sub %}Wind-smart cycling routes — into the wind fresh, tailwind home.{% endblock %}</p>
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>

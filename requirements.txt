@@ -4,3 +4,4 @@ rich>=13.7
 python-dateutil>=2.9
 staticmap>=0.5.7
 Pillow>=10.0
+Flask>=3.0

@@ -52,24 +52,32 @@ python -m windroute.cli learn --no-surface      # fast: geometry/distance/direct
 ```
 Full setup + every option is in `README.md`.
 
+**Local web app (no terminal):** `python webapp.py` (or double-click `run.bat`) starts
+a Flask server on `127.0.0.1:5000` and opens a browser; a form runs `plan_routes` and
+shows the recommendation + 2 alternatives with inline maps + GPX downloads. Maps/GPX
+are written to `static/out/` (gitignored, swept after 1 h). Local-only; reads `ORS_API_KEY`.
+
 ## Architecture / file map
 
 ```
 windroute/
   engine.py       core: geocode, wind (+ get_wind_historical), geometric route gen + shapes, scoring, route-option selection (NO I/O — pure fns)
+  planner.py      SHARED pipeline: plan_routes() -> PlanResult (geocode->wind->staging->generate->surface->corrections->evaluate->options). No printing/files. CLI + web both call it.
   zones.py        auto-detect nearest quiet riding zone (for --ride-area staging)
   surface.py      OSM/Overpass surface + bike-lane + busy/path waytype source (OverpassSurface)
-  corrections.py  personal "I rode this" correction cache (~/.windroute/corrections.json)
+  corrections.py  personal correction cache (~/.windroute/corrections.json) + road-notes parser
   rwgps.py        Ride with GPS v1 API client (auth, list/fetch trips, trip cache, creds)
   learn.py        analyse imported trips -> rider profile + suggested weight changes (pure)
   render.py       map image + GPX output
-  cli.py          CLI: plan / mark / roads-import / corrections / forget / rwgps-login / import / learn
+  cli.py          CLI front-end: plan / mark / roads-import / corrections / forget / rwgps-login / import / learn
+webapp.py         local web front-end (Flask); templates/ has the HTML; run.bat launches it
 discord_bot.py    optional Discord front-end (imports windroute; not wired to CLI)
 README.md         user-facing setup + usage
 requirements.txt  deps
 ```
-**Design rule:** every front-end (CLI, Discord, future web) is a thin layer over
-`engine` + `render`. Never reimplement logic in a front-end.
+**Design rule:** every front-end (CLI, web, Discord) is a thin layer over
+`planner` (orchestration) + `engine`/`render` (logic + output). Never reimplement the
+pipeline in a front-end — `plan_routes` is the one place it lives.
 
 ---
 

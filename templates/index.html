@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+  {% if error %}<div class="err">Couldn't plan that one: {{ error }}</div>{% endif %}
+  <form class="card" method="post" action="/plan" id="planform">
+    <div class="row">
+      <div style="flex:2">
+        <label for="location">Start point</label>
+        <input type="text" id="location" name="location" value="{{ d.location }}"
+               placeholder="Mokena, IL · an address · or lat,lng">
+      </div>
+      <div>
+        <label for="distance">Distance</label>
+        <input type="number" id="distance" name="distance" value="{{ d.distance }}"
+               step="any" min="1">
+      </div>
+      <div style="max-width:110px">
+        <label for="unit">Unit</label>
+        <select id="unit" name="unit">
+          <option value="mi" {{ 'selected' if d.unit=='mi' }}>mi</option>
+          <option value="km" {{ 'selected' if d.unit=='km' }}>km</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label for="start">Start time</label>
+        <input type="text" id="start" name="start" value="{{ d.start }}"
+               placeholder="now or 2026-06-15 08:00">
+      </div>
+      <div style="max-width:160px">
+        <label for="ride_type">Ride type</label>
+        <select id="ride_type" name="ride_type">
+          <option value="road" {{ 'selected' if d.ride_type=='road' }}>road</option>
+          <option value="gravel" {{ 'selected' if d.ride_type=='gravel' }}>gravel</option>
+        </select>
+      </div>
+    </div>
+
+    <details>
+      <summary>Advanced options</summary>
+      <div>
+        <label>Route shapes</label>
+        <div class="checks">
+          {% for s in all_shapes %}
+            <label><input type="checkbox" name="shapes" value="{{ s }}"
+              {{ 'checked' if s in d.shapes }}> {{ s }}</label>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <div>
+          <label for="surface_source">Surface data</label>
+          <select id="surface_source" name="surface_source">
+            {% for v in ['ors','osm','both'] %}
+              <option value="{{ v }}" {{ 'selected' if d.surface_source==v }}>{{ v }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="ride_area">Ride-area staging</label>
+          <input type="text" id="ride_area" name="ride_area" value="{{ d.ride_area }}"
+                 placeholder="blank · auto · or a place">
+        </div>
+        <div style="max-width:130px">
+          <label for="tolerance">Tolerance</label>
+          <input type="number" id="tolerance" name="tolerance" value="{{ d.tolerance }}"
+                 step="any" min="0">
+        </div>
+        <div style="max-width:130px">
+          <label for="candidates">Candidates</label>
+          <input type="number" id="candidates" name="candidates" value="{{ d.candidates }}"
+                 min="1" max="40">
+        </div>
+      </div>
+      <div class="checks" style="margin-top:6px">
+        <label><input type="checkbox" name="corrections"
+          {{ 'checked' if d.corrections }}> Apply my road notes (corrections)</label>
+      </div>
+    </details>
+
+    <div style="margin-top:18px">
+      <button type="submit" id="go">Plan my routes</button>
+      <span id="working" class="muted" style="display:none; margin-left:12px">
+        Generating… this takes ~20–40s (talking to the routing + wind services).</span>
+    </div>
+  </form>
+
+  <script>
+    document.getElementById('planform').addEventListener('submit', function () {
+      document.getElementById('go').disabled = true;
+      document.getElementById('go').textContent = 'Planning…';
+      document.getElementById('working').style.display = 'inline';
+    });
+  </script>
+{% endblock %}

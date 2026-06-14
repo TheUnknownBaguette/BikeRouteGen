@@ -16,6 +16,12 @@ dist/
 route*.png
 route*.gpx
 
+# Web app generated maps/GPX (served from static/out at runtime)
+static/out/
+
+# Personal road-notes file (your own ground truth; roads-import recreates a template)
+road-notes.txt
+
 # Local credentials / config (these live in ~/.windroute, but ignore here too)
 .windroute/
 *.env
