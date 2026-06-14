@@ -1,0 +1,27 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python caches / build
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+
+# Generated route outputs (maps + GPX written by `plan`)
+route*.png
+route*.gpx
+
+# Local credentials / config (these live in ~/.windroute, but ignore here too)
+.windroute/
+*.env
+.env
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
