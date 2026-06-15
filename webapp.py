@@ -102,7 +102,7 @@ FORM_DEFAULTS = {
     "location": "Chicago, IL", "distance": "30", "unit": "mi", "start": "now",
     "ride_type": "road", "shapes": ["loop", "lollipop", "rectangle"],
     "surface_source": "ors", "ride_area": "", "tolerance": "3",
-    "candidates": "12", "corrections": True,
+    "candidates": "12", "corrections": True, "classify": False,
 }
 ALL_SHAPES = ["loop", "lollipop", "rectangle", "out-and-back", "roundtrip"]
 
@@ -140,9 +140,10 @@ def suggest():
 def _reshow(f, shapes, error, status):
     """Re-render the form with the submitted values and a message."""
     submitted = {**FORM_DEFAULTS, **{k: f.get(k, "") for k in FORM_DEFAULTS
-                                     if k not in ("shapes", "corrections")}}
+                                     if k not in ("shapes", "corrections", "classify")}}
     submitted["shapes"] = shapes
     submitted["corrections"] = "corrections" in f
+    submitted["classify"] = "classify" in f
     return render_template("index.html", d=submitted, all_shapes=ALL_SHAPES,
                            error=error), status
 
@@ -183,6 +184,7 @@ def plan():
             tolerance=_clamp(f.get("tolerance", 3), 0, 50, 3),
             candidates=int(_clamp(f.get("candidates", 12), 1, 20, 12)),
             corrections=("corrections" in f),
+            classify=("classify" in f),
             api_key=os.environ.get("ORS_API_KEY"),
             n_alternatives=2,
         )
@@ -247,8 +249,12 @@ def plan():
         "deg": wind.direction_from_deg, "mph": wind.speed_mph, "gust": wind.gust_mph,
         "when": wind.valid_time.replace("T", " "),
     }
+    # Surface the terrain archetype as a debug line above the other notes.
+    notes = result.notes
+    if result.region is not None:
+        notes = [result.region.note] + notes
     return render_template("results.html", label=result.location_label,
-                           wind=wind_ctx, notes=result.notes, cards=cards,
+                           wind=wind_ctx, notes=notes, cards=cards,
                            ranked=ranked_rows)
 
 

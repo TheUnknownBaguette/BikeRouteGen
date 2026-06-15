@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from dateutil import parser as dateparser
 
-from . import engine, surface, zones
+from . import engine, surface, zones, regions
 from .corrections import CorrectionCache
 
 SURFACE_DISAGREE = 0.10   # |ORS unpaved - OSM unpaved| above this -> flag a route
@@ -35,13 +35,14 @@ class PlanResult:
     options: list                # list[engine.RouteOption], recommendation first
     notes: list = field(default_factory=list)   # surface/corrections/ride-area status lines
     surface_mode: str = "ors"    # "ors" | "osm" | "both"
+    region: "regions.RegionProfile | None" = None   # terrain archetype (when classify=True)
 
 
 def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
                 shapes=("loop", "lollipop", "rectangle"), surface_source="ors",
                 ride_area=None, tolerance=3.0, candidates=12, corrections=True,
                 corrections_file=None, api_key=None, n_alternatives=2,
-                location_label=None) -> PlanResult:
+                location_label=None, classify=False) -> PlanResult:
     """Run the full planning pipeline and return a `PlanResult` (no printing/files).
 
     `shapes` may be a comma string ("loop,rectangle") or a sequence. `start` is
@@ -64,6 +65,14 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
     if location_label:                    # caller picked an exact point; keep its name
         label = location_label
     wind = engine.get_wind(lat, lng, when)
+
+    # Step 0 (Task 1): classify the surrounding terrain so later steps can adapt.
+    # Off by default and DELIBERATELY does not feed scoring/zone weights yet — that
+    # wiring is Task 2, gated so grid-farmland stays byte-identical. For now it only
+    # computes + surfaces the archetype (a note + PlanResult.region).
+    region = None
+    if classify:
+        region = regions.classify_region((lat, lng))   # structured field; front-ends render it
 
     zone = None
     if ride_area:
@@ -92,7 +101,8 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
     options = engine.select_route_options(ranked, wind, ride_type, target_km,
                                           n_alternatives=n_alternatives)
     return PlanResult(location_label=label, when=when, wind=wind, zone=zone,
-                      ranked=ranked, options=options, notes=notes, surface_mode=mode)
+                      ranked=ranked, options=options, notes=notes, surface_mode=mode,
+                      region=region)
 
 
 # --------------------------------------------------------------------------- #

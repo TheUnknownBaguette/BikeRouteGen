@@ -91,6 +91,7 @@ windroute/
   engine.py       core: geocode + suggest_places (Photon autocomplete) + parse_compass, wind (+ get_wind_historical), geometric route gen + shapes, scoring, route-option selection (NO I/O — pure fns)
   planner.py      SHARED pipeline: plan_routes() -> PlanResult (geocode->wind->staging->generate->surface->corrections->evaluate->options); optional location_label override. No printing/files. CLI + web both call it.
   zones.py        find_ride_zone: best quiet riding zone, nearest OR a forced compass direction (prefer_bearing) — for --ride-area staging
+  regions.py      classify_region -> RegionProfile (terrain archetype): one Overpass read (roads + land-use) + Open-Meteo elevation (relief), cached per ~0.1° cell. classify_archetype() is pure. Diagnostic only so far (work-plan Task 1) — does NOT yet drive weights
   surface.py      OSM/Overpass surface + bike-lane + busy/path waytype source (OverpassSurface)
   corrections.py  personal correction cache (~/.windroute/corrections.json) + road-notes parser
   rwgps.py        Ride with GPS v1 API client (auth, list/fetch trips, trip cache, creds)
@@ -114,6 +115,20 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
 
 ## Features built (all DONE + verified)
 
+- **Region archetype classifier** (`regions.py`, work-plan Task 1 — DONE): `classify_region((lat,lng))`
+  labels the country around a start as `grid-farmland`, `forested-rolling`, `mountain`,
+  `suburban-sprawl`, `coastal`, `arid-open`, or `unknown`, returning a `RegionProfile`
+  (archetype + confidence + raw feature vector). Features come from ONE Overpass read
+  (road density + class mix from highways; farmland/forest/built-up/water AREA fractions via
+  shoelace on land-use/natural polygons; coastline length) plus ONE keyless Open-Meteo
+  *elevation* read for coarse relief (range + std over a grid). `classify_archetype(features)`
+  is a **pure** prioritized decision list (offline unit tests in `tests/test_regions.py`).
+  Cached per ~0.1° cell so repeat plans in an area don't re-fetch. Verified live: Champaign IL
+  → grid-farmland, Aspen CO → mountain, Naperville IL → suburban-sprawl, Outer Banks → coastal,
+  rural NV → arid-open. **Diagnostic only:** surfaced via the CLI `classify` command + `plan
+  --classify` + a web checkbox, but it does NOT yet change scoring/zone weights (that is Task 2,
+  gated so grid-farmland stays byte-identical). Degrades to `unknown` (low confidence) on any
+  fetch failure rather than aborting a plan.
 - **Wind scoring:** `wind_score` rewards headwind on first half / tailwind home.
 - **Distance tolerance:** `-t/--tolerance` free buffer band; only excess is penalized.
 - **Elevation fix:** `engine._smoothed_ascent` (interpolate SRTM nodata, median +
@@ -300,6 +315,19 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   `_self_overlap`, which is a fallback). Trips cache in `~/.windroute/trips/`.
 - **Windows console is cp1252:** `cli.py` reconfigures stdout to UTF-8 at import or rich's
   box-drawing/maths glyphs (`█ ≤ ⚠`) raise `UnicodeEncodeError`. Don't remove that.
+- **Region classifier — relief is range/std, NOT `_smoothed_ascent`:** the work plan suggested
+  reusing `_smoothed_ascent`, but that measures ascent *along an ordered route*. Region-level
+  relief is elevation **spread over a sampled grid** (range + std), fetched from Open-Meteo's
+  keyless `/v1/elevation` endpoint (up to 100 pts/call; we send a ≤25-pt disc grid). Mountain
+  detection keys off `relief_std_m` / `relief_range_m`; if the elevation fetch fails those are
+  `None` and the classifier simply can't pick `mountain` (no crash).
+- **Region classifier Overpass query gotcha:** the union MUST be `(...);out geom;` — a missing
+  `;` after the `)` is a silent **400 Bad Request** (cost me a debug cycle). The query is heavy
+  (roads + all land-use/natural at 10 km), so `overpass-api.de` frequently **504s** under load;
+  the classifier then returns `unknown` (low confidence) by design. Observed during dev that the
+  `maps.mail.ru` Overpass mirror answered the same 10 km query in ~5 s when the main instance was
+  504ing — a shared mirror-fallback across `surface.py`/`zones.py`/`regions.py` is a good future
+  hardening (not done; all three still default to `OVERPASS_URL` = overpass-api.de).
 
 ## What the trip history revealed (Jun 2026, newest 200 trips → 108 outdoor rides)
 

@@ -90,6 +90,11 @@ def plan(
     corrections_file: str = typer.Option(
         None, "--corrections-file",
         help="Path to the corrections JSON (default ~/.windroute/corrections.json)."),
+    classify: bool = typer.Option(
+        False, "--classify",
+        help="Classify the start's terrain archetype (grid-farmland, mountain, "
+             "suburban-sprawl, …) and show it. Diagnostic only for now — it does "
+             "not yet change scoring (that's a later work-plan task)."),
     api_key: str = typer.Option(None, "--api-key", envvar="ORS_API_KEY",
                                 help="OpenRouteService key (or set ORS_API_KEY)."),
 ):
@@ -102,7 +107,7 @@ def plan(
                 ride_type=ride_type, shapes=shapes, surface_source=surface_source,
                 ride_area=ride_area, tolerance=tolerance, candidates=candidates,
                 corrections=corrections, corrections_file=corrections_file,
-                api_key=api_key, n_alternatives=2)
+                api_key=api_key, n_alternatives=2, classify=classify)
 
         wind, label, when = result.wind, result.location_label, result.when
         mode = result.surface_mode
@@ -110,6 +115,8 @@ def plan(
         best = options[0].candidate
 
         console.print(_wind_panel(wind, label, when))
+        if result.region is not None:
+            console.print(_region_panel(result.region))
         for note in result.notes:
             console.print(f"[dim]{note}[/]")
 
@@ -642,6 +649,70 @@ def _parse_latlng(s: str):
     if len(parts) != 2:
         raise ValueError(f"Bad --point {s!r}; expected 'lat,lng'.")
     return float(parts[0]), float(parts[1])
+
+
+@app.command()
+def classify(
+    location: str = typer.Option(
+        ..., "--location", "-l",
+        help="Place to classify: a town, a street address, or 'lat,lng'."),
+    radius: float = typer.Option(
+        None, "--radius", help="Sample radius in km (default ~10)."),
+):
+    """Classify a start point's terrain archetype (no ORS key / routing needed).
+
+    Reads the road network + land use (Overpass) and coarse relief (Open-Meteo)
+    around the point and labels it grid-farmland / forested-rolling / mountain /
+    suburban-sprawl / coastal / arid-open / unknown, with the feature vector that
+    drove the call. Diagnostic foundation for location-aware tuning.
+    """
+    from . import regions
+    try:
+        with console.status("[cyan]Reading the area (roads, land use, relief)…"):
+            lat, lng, label = engine.geocode(location)
+            kwargs = {} if radius is None else {"radius_km": radius}
+            prof = regions.classify_region((lat, lng), **kwargs)
+        console.print(_region_panel(prof, label))
+    except Exception as exc:
+        console.print(Panel(str(exc), title="[bold red]Error", border_style="red"))
+        raise typer.Exit(code=1)
+
+
+def _region_panel(prof, label=None):
+    """Render a RegionProfile: the archetype headline + the raw feature vector."""
+    conf_style = "green" if not prof.low_confidence else "yellow"
+    head = (f"[bold]{prof.archetype}[/]   "
+            f"[{conf_style}]confidence {prof.confidence:.0%}[/]")
+    if label:
+        head = f"[bold]{label}[/]\n{head}"
+    f = prof.features
+    t = Table(show_header=False, box=None, pad_edge=False)
+    t.add_column("k", style="dim")
+    t.add_column("v", justify="right")
+
+    def pct(key):
+        v = f.get(key)
+        return f"{v * 100:.0f}%" if isinstance(v, (int, float)) else "-"
+
+    t.add_row("farmland", pct("farmland_frac"))
+    t.add_row("forest", pct("forest_frac"))
+    t.add_row("built-up", pct("residential_frac"))
+    t.add_row("water", pct("water_frac"))
+    rd = f.get("road_density")
+    t.add_row("road density", f"{rd:.2f} km/km²" if rd is not None else "-")
+    t.add_row("arterial share", pct("arterial_frac"))
+    rng, std = f.get("relief_range_m"), f.get("relief_std_m")
+    t.add_row("relief range", f"{rng:.0f} m" if rng is not None else "[dim]n/a[/]")
+    t.add_row("relief std", f"{std:.0f} m" if std is not None else "[dim]n/a[/]")
+    cl = f.get("coastline_km")
+    if cl:
+        t.add_row("coastline", f"{cl:.1f} km")
+    t.add_row("OSM elements", str(f.get("n_elements", "-")))
+
+    body = Table.grid(padding=(0, 0))
+    body.add_row(Text.from_markup(head))
+    body.add_row(t)
+    return Panel(body, title="[bold cyan]Region", border_style="cyan")
 
 
 def _wind_panel(wind, label, when):
