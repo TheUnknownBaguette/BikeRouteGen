@@ -173,6 +173,9 @@ python -m windroute.cli plan -l "Champaign, IL" -d 40 --unit mi -r gravel --surf
 
 # Auto-detect the good quiet riding zone and stage the ride to it
 python -m windroute.cli plan -l "Chicago, IL" -d 40 --unit mi --ride-area auto
+
+# Adapt the tuning to the local terrain (handy when riding away from home)
+python -m windroute.cli plan -l "Asheville, NC" -d 30 --classify
 ```
 
 ### `plan` options
@@ -188,10 +191,29 @@ python -m windroute.cli plan -l "Chicago, IL" -d 40 --unit mi --ride-area auto
 | `--shapes` | Comma list: `loop,lollipop,rectangle,out-and-back,roundtrip` (default `loop,lollipop,rectangle`). `roundtrip` is the old ORS round-trip algorithm (can tangle; opt-in). |
 | `--surface-source` | `ors` (default), `osm` (finer OSM tags + bike lanes), or `both` (cross-check). |
 | `--ride-area` | `auto` to stage to the nearest quiet zone, a compass direction (`south`, `SSE`) to stage to the best quiet zone that way, or a place / `lat,lng` to force one. Omit for a normal ride from the start. |
+| `--classify` | Detect the terrain (grid-farmland, mountain, suburban, coastal, …) and **adapt the tuning to it** — weights, route shapes, quiet-zone scoring, and a region-normalized busy penalty. Off by default (your home grid-farmland results are unchanged without it). |
 | `--corrections / --no-corrections` | Apply your personal "I rode this" cache (on by default). |
 | `--candidates` | How many routes to generate and rank (default 12; more = better odds, slower, more API calls). |
 | `-o, --out` | Output file basename. Omit to auto-name each file by date/distance/shape/wind (e.g. `jun14-30mi-loop-Swind.gpx`); pass a name to force `<name>.*` / `<name>-alt1.*`. |
 | `--api-key` | ORS key override (normally read from `ORS_API_KEY`). |
+
+### Terrain-aware tuning (`--classify`)
+
+The scoring was tuned for flat Illinois grid-and-farmland riding. Add `--classify` and the tool
+first reads the terrain around your start — grid-farmland, forested-rolling, mountain,
+suburban-sprawl, coastal, arid-open — and adapts: which route **shapes** make sense (e.g. it drops
+the grid-only "rectangle" in the mountains), the **weights** (wind matters a little less where the
+terrain dominates), what counts as a good **quiet zone** (farmland in the grid, forest in the hills,
+the shore on the coast), and it normalizes the busy-road penalty to the local network so unavoidable
+arterials don't sink every route. It's **off by default**, so your home-region results don't change
+unless you ask for it.
+
+Just want to see what terrain a place is? `classify` needs no API key (it only reads OpenStreetMap +
+elevation):
+
+```powershell
+python -m windroute.cli classify -l "Asheville, NC"
+```
 
 ### Personal "I rode this" corrections
 
@@ -242,11 +264,16 @@ old entries.
   yourself, but there's no per-road car-traffic feed. Eyeball + correct as you go.
 - **Gravel** relies on OpenStreetMap `surface` tags, which are incomplete. Treat
   the gravel % as a hint; `--surface-source osm`, `both`, and your correction
-  cache are how you inject reality. Street View still wins for surface truth.
+  cache are how you inject reality. Street View still wins for surface truth. When the
+  tags are sparse, the tool now says so — a **low surface-data confidence** flag rather
+  than a confidently-wrong gravel figure.
 - **Wind optimization** ranks a handful of generated routes rather than searching
   exhaustively. More `--candidates` improves the odds at the cost of speed/API calls.
 - **Ride-area staging** uses open farmland as its "quiet country" proxy, so it
   shines in grid/cornfield regions and is weaker where good riding isn't farmland.
+- **Terrain adaptation** (`--classify`) is calibrated against real rides only for flat
+  grid-farmland; other terrains use sensible first-pass weights, so treat its tuning
+  away from home as a reasonable default rather than a finely-tuned one.
 
 ## Project layout
 
@@ -254,8 +281,9 @@ old entries.
 windroute/
   engine.py       core: geocode + autocomplete, wind, route generation + shapes, scoring (no I/O)
   planner.py      the shared planning pipeline every front-end calls (plan_routes)
+  regions.py      classify the terrain archetype around a start (for --classify / classify)
   zones.py        auto-detect a quiet riding zone, by direction or nearest (for --ride-area)
-  surface.py      OpenStreetMap/Overpass surface + bike-lane source
+  surface.py      OpenStreetMap/Overpass surface + bike-lane + gravel-quality source; provider registry
   corrections.py  the personal "I rode this" correction cache + road-notes parser
   rwgps.py        Ride with GPS API client (for the `learn` command's trip history)
   learn.py        analyse imported trips -> rider profile + suggested weight changes
@@ -265,6 +293,7 @@ webapp.py         the local/hosted web front-end (Flask)
 discord_bot.py    optional Discord front-end (thin over planner; not wired in)
 templates/        web app HTML (base, index, results, about)
 static/           web app JS (app.js) + generated maps/GPX (out/, swept hourly)
+tests/            offline unit tests (regions, weights, surface quality, providers)
 run.bat           double-click launcher for the web app (self-builds the venv)
 Procfile          production start command for a host (waitress-serve webapp:app)
 ```

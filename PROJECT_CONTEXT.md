@@ -46,7 +46,13 @@ import into Ride with GPS.
 cd path\to\BikeRouteGen
 .\.venv\Scripts\Activate.ps1
 python -m windroute.cli plan -l "Chicago, IL" -d 30 -s "2026-06-14 08:00" -r road
+python -m windroute.cli plan -l "Aspen, CO" -d 25 --classify   # adapt tuning to terrain
+python -m windroute.cli classify -l "Aspen, CO"                # terrain archetype only (no ORS key)
 ```
+
+`--classify` (and the `classify` command) read the terrain archetype (Tasks 1-2) and adapt
+weights/shapes/zones + normalize the busy penalty (Task 4a); off by default so the validated
+grid-farmland road path stays byte-identical. `classify` needs no ORS key (Overpass + Open-Meteo only).
 
 `ORS_API_KEY` is set at User level, so new terminals inherit it. If a terminal was
 open *before* it was set, load it manually:
@@ -107,7 +113,7 @@ windroute/
   rwgps.py        Ride with GPS v1 API client (auth, list/fetch trips, trip cache, creds)
   learn.py        analyse imported trips -> rider profile + suggested weight changes (pure)
   render.py       map image + GPX output
-  cli.py          CLI front-end: plan / mark / roads-import / corrections / forget / rwgps-login / import / learn
+  cli.py          CLI front-end: plan / classify / mark / roads-import / corrections / forget / rwgps-login / import / learn
 webapp.py         local/hosted web front-end (Flask): routes / /plan /suggest /about; headers + rate limit
 discord_bot.py    optional Discord front-end (thin over planner.plan_routes; needs discord.py; not wired in)
 templates/        web HTML: base / index (form) / results / about (privacy + disclaimer)
