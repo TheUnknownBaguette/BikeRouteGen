@@ -11,6 +11,7 @@ import requests
 
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+PHOTON_URL = "https://photon.komoot.io/api"   # OSM geocoder built for type-ahead
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 ORS_URL = "https://api.openrouteservice.org/v2/directions/{profile}/geojson"
@@ -238,25 +239,70 @@ def _geocode_openmeteo(place: str):
 
 
 def suggest_places(query: str, count: int = 6):
-    """Type-ahead place suggestions for a partial query (towns/cities).
+    """Type-ahead suggestions for a partial query — street addresses AND towns.
 
-    Backs the web form's location autocomplete. Uses Open-Meteo geocoding, which is
-    built for name search and fine with this volume — unlike Nominatim, whose usage
-    policy forbids per-keystroke autocomplete. Returns a list of
-    ``{"label", "lat", "lng"}``; each label is a "City, Region, CC" string that
-    geocode() can resolve again on submit. Never raises — returns [] on any problem.
+    Backs the web form's location autocomplete. Primary source is Photon
+    (photon.komoot.io), an OSM geocoder purpose-built for autocomplete, so house
+    numbers and streets resolve as you type — unlike Nominatim, whose usage policy
+    forbids per-keystroke queries, or Open-Meteo, which only knows town centroids.
+    Falls back to Open-Meteo town search if Photon is unavailable. Returns a list of
+    ``{"label", "lat", "lng"}``; never raises (returns [] on any problem).
     """
     q = (query or "").strip()
-    name = q.split(",", 1)[0].strip() if "," in q else q   # match on the city part
+    if len(q) < 2:
+        return []
+    items = _suggest_photon(q, count)
+    return items if items else _suggest_openmeteo(q, count)
+
+
+def _suggest_photon(query: str, count: int):
+    """Address + place suggestions from Photon (GeoJSON). [] on failure."""
+    try:
+        r = requests.get(PHOTON_URL, params={"q": query, "limit": count, "lang": "en"},
+                         headers={"User-Agent": USER_AGENT}, timeout=8)
+        r.raise_for_status()
+        features = r.json().get("features") or []
+    except (requests.RequestException, ValueError):
+        return []
+    out, seen = [], set()
+    for feat in features:
+        props = feat.get("properties", {})
+        coords = feat.get("geometry", {}).get("coordinates")        # [lng, lat]
+        if not coords or len(coords) < 2:
+            continue
+        label = _photon_label(props)
+        if label and label.lower() not in seen:
+            seen.add(label.lower())
+            out.append({"label": label, "lat": coords[1], "lng": coords[0]})
+    return out
+
+
+def _photon_label(props: dict) -> str:
+    """Build a concise, geocodable label from a Photon feature's properties."""
+    house, street, name = props.get("housenumber"), props.get("street"), props.get("name")
+    if street:
+        primary = f"{house} {street}" if house else street
+    else:
+        primary = name
+    locality = (props.get("city") or props.get("town") or props.get("village")
+                or props.get("district") or props.get("county"))
+    parts = [primary, locality, props.get("state"),
+             props.get("country") or props.get("countrycode")]
+    label = []
+    for p in parts:                       # keep order, drop blanks + adjacent dupes
+        if p and (not label or label[-1].lower() != p.lower()):
+            label.append(p)
+    return ", ".join(label)
+
+
+def _suggest_openmeteo(query: str, count: int):
+    """Town/city fallback suggestions from Open-Meteo, ranked by population."""
+    name = query.split(",", 1)[0].strip() if "," in query else query
     if len(name) < 2:
         return []
     try:
-        # Over-fetch, then re-rank locally: Open-Meteo returns exact-name matches
-        # first, so a tiny same-named village outranks the populous place the user
-        # almost certainly means (e.g. "Moke, CD" ahead of "Mokena, IL").
         r = requests.get(GEOCODE_URL, params={
-            "name": name, "count": 20,
-            "language": "en", "format": "json"}, timeout=8)
+            "name": name, "count": 20, "language": "en", "format": "json"}, timeout=8)
         r.raise_for_status()
         results = r.json().get("results") or []
     except (requests.RequestException, ValueError):

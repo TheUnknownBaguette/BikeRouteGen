@@ -39,6 +39,15 @@
   list.hidden = true;
   holder.appendChild(list);
 
+  var pLat = document.getElementById('picked_lat');
+  var pLng = document.getElementById('picked_lng');
+  var pLabel = document.getElementById('picked_label');
+  function setPicked(it) {            // remember the exact point behind a chosen label
+    if (pLat) pLat.value = it ? it.lat : '';
+    if (pLng) pLng.value = it ? it.lng : '';
+    if (pLabel) pLabel.value = it ? it.label : '';
+  }
+
   var items = [], sel = -1, timer = null, lastQ = '';
 
   function close() { list.hidden = true; list.innerHTML = ''; items = []; sel = -1; }
@@ -46,6 +55,7 @@
   function choose(i) {
     if (i < 0 || i >= items.length) return;
     input.value = items[i].label;
+    setPicked(items[i]);
     close();
   }
 
@@ -65,9 +75,13 @@
   input.addEventListener('input', function () {
     var q = input.value.trim();
     lastQ = q;
+    setPicked(null);                  // typing invalidates any previously picked point
     clearTimeout(timer);
-    // Skip very short queries and anything that looks like lat,lng coordinates.
-    if (q.length < 2 || /^[-+]?\d/.test(q)) { close(); return; }
+    // Skip short queries and anything that looks like a lat,lng pair (two numbers
+    // split by a comma). House-number addresses ("19150 88th Ave") are NOT skipped.
+    if (q.length < 2 || /^[-+]?\d{1,3}(\.\d+)?\s*,\s*[-+]?\d{1,3}(\.\d+)?/.test(q)) {
+      close(); return;
+    }
     timer = setTimeout(function () {
       fetch('/suggest?q=' + encodeURIComponent(q))
         .then(function (r) { return r.ok ? r.json() : []; })

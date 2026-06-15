@@ -156,9 +156,23 @@ def plan():
         return _reshow(f, shapes, "Too many plans in a short time — this is a small "
                        "shared instance. Please wait a few minutes and try again.", 429)
 
+    # If the user picked an autocomplete suggestion (and didn't then edit the text),
+    # route from its exact coordinates but keep the readable label for display.
+    location_arg = f.get("location", "").strip()
+    label_override = None
+    plat, plng = f.get("picked_lat", "").strip(), f.get("picked_lng", "").strip()
+    plabel = f.get("picked_label", "").strip()
+    if plat and plng and plabel and plabel == location_arg:
+        try:
+            location_arg = f"{float(plat)},{float(plng)}"
+            label_override = plabel
+        except ValueError:
+            location_arg = f.get("location", "").strip()
+
     try:
         result = planner.plan_routes(
-            location=f.get("location", "").strip(),
+            location=location_arg,
+            location_label=label_override,
             distance=_clamp(f.get("distance", 0), 1, 200, 30),
             unit=f.get("unit", "mi"),
             start=f.get("start", "now").strip() or "now",

@@ -40,7 +40,8 @@ class PlanResult:
 def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
                 shapes=("loop", "lollipop", "rectangle"), surface_source="ors",
                 ride_area=None, tolerance=3.0, candidates=12, corrections=True,
-                corrections_file=None, api_key=None, n_alternatives=2) -> PlanResult:
+                corrections_file=None, api_key=None, n_alternatives=2,
+                location_label=None) -> PlanResult:
     """Run the full planning pipeline and return a `PlanResult` (no printing/files).
 
     `shapes` may be a comma string ("loop,rectangle") or a sequence. `start` is
@@ -60,6 +61,8 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
 
     notes: list = []
     lat, lng, label = engine.geocode(location)
+    if location_label:                    # caller picked an exact point; keep its name
+        label = location_label
     wind = engine.get_wind(lat, lng, when)
 
     zone = None
