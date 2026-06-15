@@ -18,6 +18,7 @@ on absolute thresholds that would differ between Illinois and Vermont.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 import requests
 
@@ -42,6 +43,58 @@ W_ART = 0.4       # penalty per km of arterial
 FARM_CENTROID_W = 1.0   # weight a farmland polygon gets when locating the zone center
 GRID_CENTROID_W = 0.1   # per-km weight quiet roads get when locating the zone center
 
+# Extra "good country" land signals other archetypes care about (grid-farmland
+# ignores these — its weights below are 0, so its scoring stays byte-identical).
+FOREST_USES = {"forest"}                 # landuse=forest (natural=wood handled too)
+WATER_USES = {"reservoir", "basin", "water"}   # landuse=*; natural=water handled too
+
+
+# --------------------------------------------------------------------------- #
+# Archetype-keyed zone scoring (work-plan Task 2)
+# --------------------------------------------------------------------------- #
+# "Good quiet riding" means different land cover in different country: open
+# farmland in the grid, forest in the hills, the shore on the coast. `ZoneWeights`
+# captures the per-sector scoring signals; `ZONE_WEIGHTS_BY_ARCHETYPE` swaps them
+# by terrain. The `grid-farmland` row is the original farmland-only tuning (forest
+# and water weights 0), so its scoring AND its Overpass query are unchanged. Other
+# rows are a first pass — calibrate later (work-plan Task 8).
+@dataclass(frozen=True)
+class ZoneWeights:
+    w_grid: float = W_GRID
+    w_farm: float = W_FARM
+    w_art: float = W_ART
+    w_forest: float = 0.0
+    w_water: float = 0.0
+    forest_cw: float = 0.0      # centroid weight for forest polygons
+    water_cw: float = 0.0       # centroid weight for water polygons
+
+
+_GRID_FARMLAND_ZONE = ZoneWeights()
+
+ZONE_WEIGHTS_BY_ARCHETYPE = {
+    "grid-farmland": _GRID_FARMLAND_ZONE,
+    # Hills/forest: the woods (and a little water) are the draw, farmland less so.
+    "forested-rolling": ZoneWeights(w_farm=0.4, w_forest=1.0, forest_cw=1.0,
+                                    w_water=0.3, water_cw=0.4),
+    "mountain": ZoneWeights(w_grid=0.1, w_farm=0.2, w_art=0.5, w_forest=0.8,
+                            forest_cw=1.0, w_water=0.3, water_cw=0.5),
+    # Coastal: ride toward the water; forest a secondary scenic plus.
+    "coastal": ZoneWeights(w_farm=0.5, w_water=1.0, water_cw=1.0,
+                           w_forest=0.3, forest_cw=0.3),
+    # Suburban: the goal is to ESCAPE to open country — same farmland-seeking
+    # signal as grid-farmland (this is the detector's original use case).
+    "suburban-sprawl": _GRID_FARMLAND_ZONE,
+    # Arid-open: open country but not cultivated; lean less on farmland.
+    "arid-open": ZoneWeights(w_grid=0.2, w_farm=0.5, w_art=0.4),
+    "unknown": _GRID_FARMLAND_ZONE,
+}
+
+
+def zone_weights_for(archetype) -> ZoneWeights:
+    """ZoneWeights for an archetype (None / unmapped -> grid-farmland baseline)."""
+    return ZONE_WEIGHTS_BY_ARCHETYPE.get(archetype or "grid-farmland",
+                                         _GRID_FARMLAND_ZONE)
+
 
 def _seg_len_km(pts):
     return sum(_haversine_km(a, b) for a, b in zip(pts, pts[1:]))
@@ -55,7 +108,7 @@ def _angle_diff(a, b):
 
 def find_ride_zone(lat, lng, search_km=20.0, inner_km=5.0, sectors=12,
                    timeout=90, url=OVERPASS_URL, min_advantage=1.6,
-                   prefer_bearing=None):
+                   prefer_bearing=None, archetype=None):
     """Find the best 'good riding' staging zone around (lat, lng).
 
     Returns a dict ``{lat, lng, bearing, distance_km, score, label, sectors}`` for
@@ -67,18 +120,29 @@ def find_ride_zone(lat, lng, search_km=20.0, inner_km=5.0, sectors=12,
     that way: pick the best-scoring sector within ~45 deg of that heading and skip the
     "standout" and "already in good country" gates — honor the chosen direction even
     if it isn't the globally best one. Returns None only if the lookup itself fails.
+
+    `archetype` (from `regions.classify_region`) selects what "good country" means
+    via `ZoneWeights`: farmland in the grid, forest in the hills, water on the
+    coast. None / 'grid-farmland' reproduces the original farmland-only scoring and
+    Overpass query exactly.
     """
+    zw = zone_weights_for(archetype)
+    want_forest = zw.w_forest > 0 or zw.forest_cw > 0
+    want_water = zw.w_water > 0 or zw.water_cw > 0
+
     width = 360.0 / sectors
     grid = [0.0] * sectors
     art = [0.0] * sectors
     farm = [0.0] * sectors
+    forest = [0.0] * sectors
+    water = [0.0] * sectors
     # weighted centroid accumulators (locate where the good stuff actually is)
     cx = [0.0] * sectors
     cy = [0.0] * sectors
     cw = [0.0] * sectors
-    farm_in = 0.0          # farmland polygons in the inner "home" ring
+    farm_in = forest_in = water_in = 0.0    # positive land signals in the inner ring
 
-    elements = _query(lat, lng, search_km, timeout, url)
+    elements = _query(lat, lng, search_km, timeout, url, want_forest, want_water)
     if elements is None:
         return None
 
@@ -86,6 +150,9 @@ def find_ride_zone(lat, lng, search_km=20.0, inner_km=5.0, sectors=12,
         tags = el.get("tags", {})
         hw = tags.get("highway")
         lu = tags.get("landuse")
+        nat = tags.get("natural")
+        is_forest = lu in FOREST_USES or nat == "wood"
+        is_water = lu in WATER_USES or nat == "water"
         if "geometry" in el:
             pts = [(g["lat"], g["lon"]) for g in el["geometry"]]
             if len(pts) < 2:
@@ -103,6 +170,10 @@ def find_ride_zone(lat, lng, search_km=20.0, inner_km=5.0, sectors=12,
         if dist < inner_km:
             if lu == "farmland":
                 farm_in += 1.0
+            elif is_forest:
+                forest_in += 1.0
+            elif is_water:
+                water_in += 1.0
             continue
         if dist > search_km:
             continue
@@ -121,9 +192,26 @@ def find_ride_zone(lat, lng, search_km=20.0, inner_km=5.0, sectors=12,
             cx[s] += mid[0] * FARM_CENTROID_W
             cy[s] += mid[1] * FARM_CENTROID_W
             cw[s] += FARM_CENTROID_W
+        elif is_forest:
+            forest[s] += 1.0
+            cx[s] += mid[0] * zw.forest_cw
+            cy[s] += mid[1] * zw.forest_cw
+            cw[s] += zw.forest_cw
+        elif is_water:
+            water[s] += 1.0
+            cx[s] += mid[0] * zw.water_cw
+            cy[s] += mid[1] * zw.water_cw
+            cw[s] += zw.water_cw
 
-    scores = [W_GRID * grid[i] + W_FARM * farm[i] - W_ART * art[i]
+    scores = [zw.w_grid * grid[i] + zw.w_farm * farm[i] + zw.w_forest * forest[i]
+              + zw.w_water * water[i] - zw.w_art * art[i]
               for i in range(sectors)]
+    # The positive "good land" signal per sector (used by the gates below), weighted
+    # the same way. For grid-farmland this is just w_farm*farm, so the gate ratios are
+    # identical to the original farmland-only logic.
+    land = [zw.w_farm * farm[i] + zw.w_forest * forest[i] + zw.w_water * water[i]
+            for i in range(sectors)]
+    land_in = zw.w_farm * farm_in + zw.w_forest * forest_in + zw.w_water * water_in
 
     if prefer_bearing is not None:
         # Forced direction: choose the best sector within ~45 deg of the heading,
@@ -147,15 +235,17 @@ def find_ride_zone(lat, lng, search_km=20.0, inner_km=5.0, sectors=12,
         if best_score <= 0 or best_score < bar:
             return None
 
-        # "Already in good country" gate: if the home inner ring is itself farm-rich,
+        # "Already in good country" gate: if the home inner ring is itself rich in
+        # the archetype's good land (farmland in the grid, forest in the hills, …),
         # there's nothing to stage to — just ride a wind loop from where you are.
-        # Compare farmland DENSITY (polys per km^2) so the small inner disc and the
+        # Compare DENSITY (weighted land per km^2) so the small inner disc and the
         # larger sector band are compared fairly. Home wins if its density is at
-        # least ~70% of the best sector's.
+        # least ~70% of the best sector's. (For grid-farmland this is exactly the
+        # original farmland-density comparison.)
         inner_area = math.pi * inner_km ** 2
         sector_area = (math.pi / sectors) * (search_km ** 2 - inner_km ** 2)
-        home_density = farm_in / inner_area if inner_area > 0 else 0.0
-        best_density = farm[best] / sector_area if sector_area > 0 else 0.0
+        home_density = land_in / inner_area if inner_area > 0 else 0.0
+        best_density = land[best] / sector_area if sector_area > 0 else 0.0
         if home_density >= 0.7 * best_density:
             return None
 
@@ -175,8 +265,12 @@ def find_ride_zone(lat, lng, search_km=20.0, inner_km=5.0, sectors=12,
     }
 
 
-def _query(lat, lng, search_km, timeout, url):
-    """One Overpass call for grid roads (geom), arterials (geom), farmland (center)."""
+def _query(lat, lng, search_km, timeout, url, want_forest=False, want_water=False):
+    """One Overpass call for grid roads (geom), arterials (geom), farmland (center).
+
+    Forest and water polygons are only requested when the archetype's weights use
+    them (`want_forest`/`want_water`), so grid-farmland's query stays byte-identical.
+    """
     r = int(search_km * 1000)
     grid_re = "|".join(GRID_HIGHWAYS)
     art_re = "|".join(ARTERIAL_HIGHWAYS)
@@ -187,6 +281,12 @@ def _query(lat, lng, search_km, timeout, url):
         f'way["highway"~"^({art_re})$"]{around};out geom;'
         f'way["landuse"="farmland"]{around};out center;'
     )
+    if want_forest:
+        query += (f'way["landuse"="forest"]{around};out center;'
+                  f'way["natural"="wood"]{around};out center;')
+    if want_water:
+        query += (f'way["natural"="water"]{around};out center;'
+                  f'way["landuse"~"^(reservoir|basin)$"]{around};out center;')
     try:
         resp = requests.post(url, data={"data": query}, timeout=timeout + 15,
                              headers={"User-Agent": USER_AGENT})

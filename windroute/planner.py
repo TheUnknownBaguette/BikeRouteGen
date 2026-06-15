@@ -71,12 +71,25 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
     # wiring is Task 2, gated so grid-farmland stays byte-identical. For now it only
     # computes + surfaces the archetype (a note + PlanResult.region).
     region = None
+    archetype = None
     if classify:
         region = regions.classify_region((lat, lng))   # structured field; front-ends render it
+        archetype = region.archetype
+
+    # Archetype-keyed tuning (Task 2): route-score weights, loop geometry, and the
+    # default shape set adapt to the terrain. When classify is off, archetype is
+    # None and every *_for(None) returns the grid-farmland baseline, so behaviour
+    # (and the grid-farmland row) is byte-identical to before.
+    weights = engine.weights_for(archetype)
+    loop_geom = engine.loop_geom_for(archetype)
+    shape_list = engine.shapes_for(archetype, shape_list)
+    if archetype and archetype not in ("grid-farmland", "unknown"):
+        notes.append(f"terrain: tuning for {archetype} "
+                     f"(shapes: {', '.join(shape_list)})")
 
     zone = None
     if ride_area:
-        zone, note = _resolve_ride_area(ride_area, lat, lng, target_km)
+        zone, note = _resolve_ride_area(ride_area, lat, lng, target_km, archetype)
         if note:
             notes.append(note)
         if zone:
@@ -84,7 +97,8 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
 
     cands = engine.generate_candidates(
         lat, lng, target_km, ride_type, api_key, n=candidates,
-        shapes=shape_list, into_wind_bearing=wind.into_wind_bearing, zone=zone)
+        shapes=shape_list, into_wind_bearing=wind.into_wind_bearing, zone=zone,
+        loop_geom=loop_geom)
 
     mode = surface_source.lower()
     if mode == "osm":
@@ -97,7 +111,8 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
         if note:
             notes.append(note)
 
-    ranked = engine.evaluate(cands, wind, ride_type, target_km, tolerance_km)
+    ranked = engine.evaluate(cands, wind, ride_type, target_km, tolerance_km,
+                             weights=weights)
     options = engine.select_route_options(ranked, wind, ride_type, target_km,
                                           n_alternatives=n_alternatives)
     return PlanResult(location_label=label, when=when, wind=wind, zone=zone,
@@ -108,7 +123,7 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
 # --------------------------------------------------------------------------- #
 # Pipeline steps (moved from cli.py; return note strings instead of printing)
 # --------------------------------------------------------------------------- #
-def _resolve_ride_area(ride_area, lat, lng, target_km):
+def _resolve_ride_area(ride_area, lat, lng, target_km, archetype=None):
     """Turn the --ride-area value into a staging zone dict + a status note.
 
     'auto' auto-detects the nearest good quiet riding zone from the start; any
@@ -122,7 +137,8 @@ def _resolve_ride_area(ride_area, lat, lng, target_km):
     prefer = None if area.lower() == "auto" else engine.parse_compass(area)
     if area.lower() == "auto" or prefer is not None:
         # 'auto' = best zone anywhere; a compass direction = best zone that way.
-        zone = zones.find_ride_zone(lat, lng, prefer_bearing=prefer)
+        zone = zones.find_ride_zone(lat, lng, prefer_bearing=prefer,
+                                    archetype=archetype)
         if not zone:
             if prefer is not None:
                 return None, (f"ride-area: couldn't find quiet riding to the "

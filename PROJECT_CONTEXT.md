@@ -129,6 +129,25 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   --classify` + a web checkbox, but it does NOT yet change scoring/zone weights (that is Task 2,
   gated so grid-farmland stays byte-identical). Degrades to `unknown` (low confidence) on any
   fetch failure rather than aborting a plan.
+- **Archetype-keyed weight + shape tables** (work-plan Task 2 — DONE): the route scorer,
+  loop geometry, default shapes, and quiet-zone scoring now adapt to the region archetype.
+  `engine.RouteWeights` + `WEIGHTS_BY_ARCHETYPE` (route-score tunables), `LOOP_GEOM_BY_ARCHETYPE`
+  (n-gon side counts + detour — curvier loops for mountain/forest), `SHAPES_BY_ARCHETYPE`
+  (mountain/forested drop the grid-only `rectangle`), and `zones.ZoneWeights` +
+  `ZONE_WEIGHTS_BY_ARCHETYPE` (farmland in the grid, **forest/water** signals added for
+  hills/coast). Helpers: `engine.weights_for / loop_geom_for / shapes_for`, `zones.zone_weights_for`.
+  Threaded through `plan_routes` (it derives them from `region.archetype` and passes them to
+  `generate_candidates(loop_geom=)`, `evaluate(weights=)`, `find_ride_zone(archetype=)`).
+  **Regression-safe:** the `grid-farmland` row is built FROM the existing constants (single
+  source of truth) and `unknown`/`None` fall back to it, so the default path (classify off) is
+  byte-identical — `weights_for(None) is weights_for("grid-farmland")`, and grid-farmland's zone
+  Overpass query is unchanged (forest/water only fetched when an archetype uses them). Adaptivity
+  is still **opt-in behind `--classify`** for now (regression-trivial + keeps the flaky Overpass
+  read off every plan's critical path); flipping to default-on is a one-line change once the
+  Overpass mirror-fallback hardening lands. Offline invariant tests in `tests/test_weights.py`
+  (grid-farmland == constants, default path identical, mountain drops rectangle, etc.); live-verified
+  that per-archetype zone scoring shifts the chosen direction (forest/coast vs farmland). **Non-grid
+  rows are a deliberately conservative FIRST PASS — calibrate against real rides later (Task 8).**
 - **Wind scoring:** `wind_score` rewards headwind on first half / tailwind home.
 - **Distance tolerance:** `-t/--tolerance` free buffer band; only excess is penalized.
 - **Elevation fix:** `engine._smoothed_ascent` (interpolate SRTM nodata, median +
@@ -321,6 +340,15 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   keyless `/v1/elevation` endpoint (up to 100 pts/call; we send a ≤25-pt disc grid). Mountain
   detection keys off `relief_std_m` / `relief_range_m`; if the elevation fetch fails those are
   `None` and the classifier simply can't pick `mountain` (no crash).
+- **Archetype tuning is regression-safe by construction:** the `grid-farmland` `RouteWeights`/
+  `ZoneWeights` rows are built FROM the existing module constants (not re-typed numbers), so they
+  can't drift, and `weights_for(None) is weights_for("grid-farmland")` (identity). `evaluate` and
+  `find_ride_zone` reduce to the exact prior arithmetic when archetype is None/grid-farmland —
+  e.g. zone `land`/`land_in` = `w_farm*farm` only (forest/water weights 0), so the "already in good
+  country" density ratio is unchanged. **Zone centroid weights are kept SEPARATE from score weights**
+  (`FARM_CENTROID_W=1.0` ≠ `W_FARM=1.0` conceptually; grid centroid `0.1` ≠ score `0.15`) — reusing
+  score weights for the centroid would silently move the grid-farmland zone center and break
+  byte-identity. New forest/water centroid weights are 0 for grid-farmland.
 - **Region classifier Overpass query gotcha:** the union MUST be `(...);out geom;` — a missing
   `;` after the `)` is a silent **400 Bad Request** (cost me a debug cycle). The query is heavy
   (roads + all land-use/natural at 10 km), so `overpass-api.de` frequently **504s** under load;

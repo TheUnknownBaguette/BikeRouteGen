@@ -95,6 +95,18 @@ feature vector.
 
 ## Task 2 — Archetype-keyed weight + shape tables
 
+> **STATUS: DONE (2026-06-15).** `engine.RouteWeights` + `WEIGHTS_BY_ARCHETYPE`,
+> `LOOP_GEOM_BY_ARCHETYPE`, `SHAPES_BY_ARCHETYPE` (mountain/forested drop `rectangle`),
+> `zones.ZoneWeights` + `ZONE_WEIGHTS_BY_ARCHETYPE` (forest/water signals added to the zone
+> query/scoring). Helpers `weights_for`/`loop_geom_for`/`shapes_for`/`zone_weights_for`, threaded
+> through `plan_routes` → `generate_candidates(loop_geom=)`, `evaluate(weights=)`,
+> `find_ride_zone(archetype=)`. grid-farmland rows are built FROM the existing constants so the
+> default path is byte-identical (`weights_for(None) is weights_for("grid-farmland")`), and
+> grid-farmland's zone query is unchanged. Offline regression/invariant tests in
+> `tests/test_weights.py`; live-verified that per-archetype zone scoring shifts the chosen
+> direction. Adaptivity remains opt-in behind `--classify` (see PROJECT_CONTEXT). Non-grid rows
+> are a conservative first pass (calibrate in Task 8). **Next: Task 3.**
+
 **Goal:** replace constants currently used as universal with per-archetype tables. The
 `grid-farmland` row must equal **today's exact values** (regression-safe).
 

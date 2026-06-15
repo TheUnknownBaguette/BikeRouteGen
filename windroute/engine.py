@@ -751,7 +751,8 @@ def _make_out_back(api_key, profile, lat, lng, target_km, bearing, timeout, deto
 
 
 def _make_lollipop(api_key, profile, lat, lng, target_km, bearing, seed,
-                   timeout, detour=1.3, loop_frac=0.35):
+                   timeout, detour=1.3, loop_frac=0.35,
+                   loop_sides=_LOOP_SIDES, loop_detour=1.25):
     """Out-and-back stem with a clean geometric 'candy' loop at the far end.
 
     The candy is a polygon loop (like the default "loop" shape), NOT an ORS
@@ -759,7 +760,8 @@ def _make_lollipop(api_key, profile, lat, lng, target_km, bearing, seed,
     routed endpoint (a real road node) rather than the crow-flies target, so the
     far waypoint is always routable and the stem<->candy seam has no stub. Sides
     and travel direction vary by `seed` for variety; the candy bulges further out
-    along `bearing` (continuing away from home)."""
+    along `bearing` (continuing away from home). `loop_sides`/`loop_detour` are the
+    archetype loop geometry (default = grid-farmland)."""
     loop_km = max(5.0, target_km * loop_frac)
     stem_oneway = max(1.0, (target_km - loop_km) / 2.0)
     crow_km = stem_oneway / detour
@@ -772,8 +774,8 @@ def _make_lollipop(api_key, profile, lat, lng, target_km, bearing, seed,
     glat, glng = s_coords[-1]
     verts = _polygon_loop_waypoints(
         glat, glng, loop_km, bearing,
-        n_sides=_LOOP_SIDES[seed % len(_LOOP_SIDES)],
-        orient=(1 if (seed // len(_LOOP_SIDES)) % 2 == 0 else -1), detour=1.25)
+        n_sides=loop_sides[seed % len(loop_sides)],
+        orient=(1 if (seed // len(loop_sides)) % 2 == 0 else -1), detour=loop_detour)
     l_coords, l_eles, l_dist, l_pav, l_unp, l_busy, l_path, l_run = _ors_directions(
         api_key, profile, [[vlng, vlat] for vlat, vlng in verts], timeout)
 
@@ -795,7 +797,8 @@ def _make_lollipop(api_key, profile, lat, lng, target_km, bearing, seed,
 
 
 def _make_staging(api_key, profile, lat, lng, target_km, zone, seed,
-                  timeout, min_loop_km=8.0, detour=1.3):
+                  timeout, min_loop_km=8.0, detour=1.3,
+                  loop_sides=_LOOP_SIDES, loop_detour=1.25):
     """Transit to a detected 'good riding' zone, loop there, transit home.
 
     Like a lollipop, but the stem is aimed at the ride zone the detector found
@@ -820,9 +823,8 @@ def _make_staging(api_key, profile, lat, lng, target_km, zone, seed,
 
     # Geometric polygon loop for the zone; end the stem a loop-radius short of the
     # centroid so the loop, bulging toward the zone, centers on it.
-    n_sides = _LOOP_SIDES[seed % len(_LOOP_SIDES)]
-    orient = 1 if (seed // len(_LOOP_SIDES)) % 2 == 0 else -1
-    loop_detour = 1.25
+    n_sides = loop_sides[seed % len(loop_sides)]
+    orient = 1 if (seed // len(loop_sides)) % 2 == 0 else -1
     radius = loop_km / (loop_detour * 2.0 * n_sides * math.sin(math.pi / n_sides))
     stem_crow = max(0.5, crow - radius)
     tlat, tlng = _destination(lat, lng, bearing, stem_crow)      # stem target (near zone edge)
@@ -885,7 +887,8 @@ def _make_rectangle(api_key, profile, lat, lng, target_km, bearing, timeout,
 
 def generate_candidates(lat, lng, target_km, ride_type, api_key,
                         n=8, points=5, timeout=40, sleep=0.4,
-                        shapes=("loop",), into_wind_bearing=None, zone=None):
+                        shapes=("loop",), into_wind_bearing=None, zone=None,
+                        loop_geom=None):
     """Generate `n` candidate routes of ~target_km from (lat, lng).
 
     `shapes` chooses which route forms to produce ("loop", "out-and-back",
@@ -897,6 +900,10 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
     `zone` (a dict with 'lat'/'lng' from zones.find_ride_zone) enables the
     "staging" shape: transit to that quiet ride zone, loop there scored on the
     wind, transit home. The staging shape is only produced when a zone is given.
+
+    `loop_geom` is an optional (loop_sides_tuple, detour) pair from
+    `loop_geom_for(archetype)` controlling the polygon-loop shape (more sides + a
+    bigger detour for curvy terrain). None -> today's grid-farmland geometry.
     """
     if target_km > 100:
         raise ValueError("OpenRouteService caps round trips at 100 km. Shorten the ride.")
@@ -920,6 +927,7 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
 
     center = into_wind_bearing if into_wind_bearing is not None else 0.0
     out, seeds = [], {s: 0 for s in SHAPES}
+    loop_sides, loop_detour = loop_geom or (_LOOP_SIDES, 1.25)
 
     for shape in plan:
         idx = seeds[shape]
@@ -929,8 +937,9 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
                 # Clean geometric polygon loop; vary sides + travel direction by seed.
                 c = _make_polygon_loop(
                     api_key, profile, lat, lng, target_km, bearing, timeout,
-                    n_sides=_LOOP_SIDES[idx % len(_LOOP_SIDES)],
-                    orient=(1 if (idx // len(_LOOP_SIDES)) % 2 == 0 else -1))
+                    n_sides=loop_sides[idx % len(loop_sides)],
+                    orient=(1 if (idx // len(loop_sides)) % 2 == 0 else -1),
+                    detour=loop_detour)
             elif shape == "roundtrip":
                 c = _make_roundtrip(api_key, profile, lat, lng, target_km, points, idx, timeout)
             elif shape == "out-and-back":
@@ -940,10 +949,12 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
                                     cross_sign=(1 if idx % 2 == 0 else -1))
             elif shape == "staging":
                 c = _make_staging(api_key, profile, lat, lng, target_km, zone,
-                                  idx, timeout)
+                                  idx, timeout, loop_sides=loop_sides,
+                                  loop_detour=loop_detour)
             else:  # lollipop
                 c = _make_lollipop(api_key, profile, lat, lng, target_km, bearing,
-                                   idx, timeout)
+                                   idx, timeout, loop_sides=loop_sides,
+                                   loop_detour=loop_detour)
             out.append(c)
         except requests.HTTPError:
             pass                                  # skip a bad seed/bearing, keep going
@@ -1216,8 +1227,115 @@ W_TIDY = 0.4
 TIDY_OPTION_MAX_PER_KM = 0.25
 
 
+# --------------------------------------------------------------------------- #
+# Archetype-keyed tuning (work-plan Task 2)
+# --------------------------------------------------------------------------- #
+# The weights above were tuned for ONE place (flat IL grid-farmland, 108 real
+# rides). To let the scorer travel, the route-scoring tunables live in a
+# `RouteWeights` record, and `WEIGHTS_BY_ARCHETYPE` swaps the record by terrain
+# archetype (from `regions.classify_region`). The `grid-farmland` row is built
+# straight from the constants above, so it is byte-identical to today and the
+# default path (no classification, or `unknown`) reproduces current behaviour
+# exactly. Non-grid rows are a deliberately conservative FIRST PASS — calibrate
+# against real rides later (work-plan Task 8). Every number is a one-line edit.
+@dataclass(frozen=True)
+class RouteWeights:
+    """The route-scoring tunables `evaluate` reads, swappable per archetype."""
+    wind_scale: float = 1.0            # multiplies the ride-type base wind weight
+    road_gravel_lin: float = W_ROAD_GRAVEL_LIN
+    road_gravel_quad: float = W_ROAD_GRAVEL_QUAD
+    w_dist: float = 0.5                # distance-excess penalty coefficient
+    w_busy: float = W_BUSY
+    busy_free_frac: float = BUSY_FREE_FRAC
+    w_path: float = W_PATH
+    path_run_free_frac: float = PATH_RUN_FREE_FRAC
+    w_bikelane: float = W_BIKELANE
+    w_tidy: float = W_TIDY
+    tidy_free_per_km: float = TIDY_FREE_PER_KM
+
+
+# grid-farmland == today's constants (single source of truth, byte-identical).
+_GRID_FARMLAND_WEIGHTS = RouteWeights()
+
+WEIGHTS_BY_ARCHETYPE = {
+    "grid-farmland": _GRID_FARMLAND_WEIGHTS,
+    # Mountains/forest: wind matters a little less (terrain dominates), and a
+    # separated path or rail-trail is more often the only sane corridor, so the
+    # long-path penalty eases a touch. First pass — not yet calibrated.
+    "mountain": RouteWeights(wind_scale=0.8, w_path=0.4, path_run_free_frac=0.35),
+    "forested-rolling": RouteWeights(wind_scale=0.9, w_path=0.45,
+                                     path_run_free_frac=0.30),
+    # Coastal: shore roads and waterfront paths are the draw; ease the path
+    # penalty, keep wind (sea breezes are real and worth riding into first).
+    "coastal": RouteWeights(w_path=0.45, path_run_free_frac=0.30),
+    # Suburban: protected lanes/paths matter most for safety; reward lanes more
+    # and don't over-punish path runs (often the safest line out of a suburb).
+    "suburban-sprawl": RouteWeights(w_bikelane=0.8, w_path=0.45,
+                                    path_run_free_frac=0.35),
+    # Arid-open: like grid-farmland but emptier; keep the baseline.
+    "arid-open": _GRID_FARMLAND_WEIGHTS,
+    # Unknown / anything unmapped -> safe grid-farmland defaults.
+    "unknown": _GRID_FARMLAND_WEIGHTS,
+}
+
+# Loop geometry per archetype: (candidate n-gon side counts cycled per seed,
+# detour factor). Organic/mountain country has curvy roads, so a polygon loop with
+# MORE sides and a LARGER detour snaps its vertices onto the real graph instead of
+# cutting crow-flies lines across nothing. grid-farmland keeps today's exact values.
+LOOP_GEOM_BY_ARCHETYPE = {
+    "grid-farmland": (_LOOP_SIDES, 1.25),
+    "mountain": ((6, 7, 8, 6, 7, 8), 1.4),
+    "forested-rolling": ((6, 5, 7, 6, 5, 7), 1.35),
+    "coastal": (_LOOP_SIDES, 1.3),
+    "suburban-sprawl": (_LOOP_SIDES, 1.25),
+    "arid-open": (_LOOP_SIDES, 1.25),
+    "unknown": (_LOOP_SIDES, 1.25),
+}
+
+# Default route shapes that make sense per archetype. The wind-aligned RECTANGLE is
+# a grid-country trick (long section-line legs); it cuts nonsense lines across curvy
+# terrain, so mountain/forested drop it. grid-farmland keeps the full set.
+SHAPES_BY_ARCHETYPE = {
+    "grid-farmland": ("loop", "lollipop", "rectangle"),
+    "mountain": ("loop", "lollipop"),
+    "forested-rolling": ("loop", "lollipop"),
+    "coastal": ("loop", "lollipop", "rectangle"),
+    "suburban-sprawl": ("loop", "lollipop", "rectangle"),
+    "arid-open": ("loop", "lollipop", "rectangle"),
+    "unknown": ("loop", "lollipop", "rectangle"),
+}
+
+
+def weights_for(archetype) -> RouteWeights:
+    """RouteWeights for an archetype (None / unmapped -> grid-farmland baseline)."""
+    return WEIGHTS_BY_ARCHETYPE.get(archetype or "grid-farmland",
+                                    _GRID_FARMLAND_WEIGHTS)
+
+
+def loop_geom_for(archetype):
+    """(loop_sides_tuple, detour) for an archetype (default grid-farmland)."""
+    return LOOP_GEOM_BY_ARCHETYPE.get(archetype or "grid-farmland",
+                                      LOOP_GEOM_BY_ARCHETYPE["grid-farmland"])
+
+
+def shapes_for(archetype, requested):
+    """Filter `requested` shapes to those sensible for `archetype`, order preserved.
+
+    The archetype provides the *allowed* default set; an explicit user shape that
+    the archetype rejects (e.g. a rectangle in the mountains) is dropped. Special
+    shapes the caller adds deliberately ('staging', 'out-and-back', 'roundtrip')
+    are always honoured — they're opt-in, not archetype defaults. Never returns an
+    empty list (falls back to the requested list, then to 'loop').
+    """
+    allowed = set(SHAPES_BY_ARCHETYPE.get(archetype or "grid-farmland",
+                                          SHAPES_BY_ARCHETYPE["grid-farmland"]))
+    always = {"staging", "out-and-back", "roundtrip"}
+    out = [s for s in requested if s in allowed or s in always]
+    return out or list(requested) or ["loop"]
+
+
 def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
-             tolerance_km: float = 0.0):
+             tolerance_km: float = 0.0, weights: "RouteWeights" = None):
     """Score every candidate and return them sorted best-first.
 
     `tolerance_km` is a free buffer: a route whose length is within this many km
@@ -1227,7 +1345,12 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
 
     Routes are also penalized for time spent on arterial "State Road" class
     (US-highways) beyond a small free band, so quiet back-road routes win.
+
+    `weights` (a `RouteWeights`, default the grid-farmland baseline = today's
+    constants) lets the caller pass an archetype-tuned set; `None` reproduces
+    current behaviour exactly.
     """
+    w = weights or _GRID_FARMLAND_WEIGHTS
     into = wind.into_wind_bearing
     for c in candidates:
         c.wind_score = wind_score(c.score_coords or c.coords, into)
@@ -1242,15 +1365,15 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
             w_wind = 1.0
             # steep, ramping penalty on KNOWN gravel; small amounts are tolerable,
             # a half-gravel route loses more than the entire wind range can make up.
-            surf_term = -(W_ROAD_GRAVEL_LIN * c.unpaved_frac
-                          + W_ROAD_GRAVEL_QUAD * c.unpaved_frac ** 2)
+            surf_term = -(w.road_gravel_lin * c.unpaved_frac
+                          + w.road_gravel_quad * c.unpaved_frac ** 2)
 
         excess = max(0.0, abs(c.distance_km - target_km) - tolerance_km)
         dist_penalty = -excess / max(target_km, 1.0)
-        busy_penalty = -max(0.0, c.busy_frac - BUSY_FREE_FRAC)
+        busy_penalty = -max(0.0, c.busy_frac - w.busy_free_frac)
         # Penalize only the LONGEST contiguous path run beyond the connector band,
         # so trails used to link roads ride free but a long path stretch doesn't.
-        path_penalty = -max(0.0, c.path_run_frac - PATH_RUN_FREE_FRAC)
+        path_penalty = -max(0.0, c.path_run_frac - w.path_run_free_frac)
         lane_bonus = c.bikelane_frac                  # 0 unless OSM was consulted
         # Tidiness: count self-crossings on the scored geometry (the loop, for
         # staging) and penalize them per km beyond a small free band, so a tangled
@@ -1258,11 +1381,11 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
         geom = c.score_coords or c.coords
         c.self_intersections = _self_intersections(geom)
         tidy_penalty = -max(0.0, c.self_intersections / max(_polyline_km(geom), 1.0)
-                            - TIDY_FREE_PER_KM)
-        c.total_score = ((w_wind * wind_norm) + surf_term
-                         + (0.5 * dist_penalty) + (W_BUSY * busy_penalty)
-                         + (W_PATH * path_penalty) + (W_BIKELANE * lane_bonus)
-                         + (W_TIDY * tidy_penalty))
+                            - w.tidy_free_per_km)
+        c.total_score = ((w_wind * w.wind_scale * wind_norm) + surf_term
+                         + (w.w_dist * dist_penalty) + (w.w_busy * busy_penalty)
+                         + (w.w_path * path_penalty) + (w.w_bikelane * lane_bonus)
+                         + (w.w_tidy * tidy_penalty))
 
     return sorted(candidates, key=lambda c: c.total_score, reverse=True)
 
