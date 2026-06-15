@@ -169,6 +169,19 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
     stays byte-identical. Quality grading only bites under `--surface-source osm|both` (like bike
     lanes). Gravel scoring DID change (it was never validated — only road rides were). Display: CLI
     table flags good gravel `+Ng` / unrideable `!N`, option reasons + web cards/table show them.
+- **Volume-first busy reframe** (work-plan Task 4a — DONE): the arterial penalty is now
+  **corridor-normalized**. `evaluate(..., busy_baseline=)` charges busy only on arterial mileage
+  ABOVE the corridor's *unavoidable* level (the quietest candidate's `busy_frac`), plus the free
+  band — so a region whose quietest available roads are still somewhat busy doesn't tank every
+  route; the relatively-quietest still wins. `plan_routes` sets `busy_baseline = min(busy_frac)`
+  across the candidates **only when `--classify` is on** (the adaptivity switch), and adds a note
+  when arterials look unavoidable. Default (classify off) `busy_baseline=0.0` -> the absolute
+  penalty, **byte-identical**. NOTE: this means a grid-farmland plan WITH `--classify` can differ
+  very slightly from without when there's an unavoidable arterial (intended — more correct); the
+  regression guarantee is specifically the classify-OFF default path. **Task 4b (real AADT) is
+  deferred to Task 5** — the work plan defines it as an optional surface-provider, so it lands with
+  the provider registry. The class proxy (ORS waytype-1 / OSM busy classes) stays the universal
+  baseline.
 - **Wind scoring:** `wind_score` rewards headwind on first half / tailwind home.
 - **Distance tolerance:** `-t/--tolerance` free buffer band; only excess is penalized.
 - **Elevation fix:** `engine._smoothed_ascent` (interpolate SRTM nodata, median +

@@ -1394,7 +1394,8 @@ def _gravel_seek_reward(unpaved_frac, lo, hi):
 
 
 def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
-             tolerance_km: float = 0.0, weights: "RouteWeights" = None):
+             tolerance_km: float = 0.0, weights: "RouteWeights" = None,
+             busy_baseline: float = 0.0):
     """Score every candidate and return them sorted best-first.
 
     `tolerance_km` is a free buffer: a route whose length is within this many km
@@ -1404,6 +1405,12 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
 
     Routes are also penalized for time spent on arterial "State Road" class
     (US-highways) beyond a small free band, so quiet back-road routes win.
+
+    `busy_baseline` (Task 4a) is the corridor's *unavoidable* arterial fraction —
+    the quietest level any candidate achieves. The busy penalty is charged only on
+    arterial mileage ABOVE this baseline (plus the free band), so where every route
+    must use some arterial, the relatively-quietest still wins instead of all being
+    tanked. Default 0.0 reproduces the absolute penalty exactly.
 
     `weights` (a `RouteWeights`, default the grid-farmland baseline = today's
     constants) lets the caller pass an archetype-tuned set; `None` reproduces
@@ -1433,7 +1440,10 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
 
         excess = max(0.0, abs(c.distance_km - target_km) - tolerance_km)
         dist_penalty = -excess / max(target_km, 1.0)
-        busy_penalty = -max(0.0, c.busy_frac - w.busy_free_frac)
+        # Charge busy only on arterial mileage above the corridor's unavoidable
+        # baseline (Task 4a) and the free band — so unavoidable arterials don't
+        # tank every route; the quietest available still wins.
+        busy_penalty = -max(0.0, c.busy_frac - busy_baseline - w.busy_free_frac)
         # Penalize only the LONGEST contiguous path run beyond the connector band,
         # so trails used to link roads ride free but a long path stretch doesn't.
         path_penalty = -max(0.0, c.path_run_frac - w.path_run_free_frac)

@@ -111,8 +111,21 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
         if note:
             notes.append(note)
 
+    # Volume-first busy reframe (Task 4a): when adapting to terrain, normalize the
+    # arterial penalty against the corridor's *unavoidable* arterial level (the
+    # quietest candidate's busy fraction), so a region whose quietest roads are
+    # still somewhat busy doesn't tank every route. Off (0.0) by default ->
+    # absolute penalty, byte-identical.
+    busy_baseline = 0.0
+    if classify and cands:
+        busy_baseline = min(c.busy_frac for c in cands)
+        if busy_baseline > engine.BUSY_FREE_FRAC:
+            notes.append(f"busy: arterials look hard to avoid here "
+                         f"(~{busy_baseline * 100:.0f}% unavoidable); scoring the "
+                         f"quietest available rather than penalizing all routes.")
+
     ranked = engine.evaluate(cands, wind, ride_type, target_km, tolerance_km,
-                             weights=weights)
+                             weights=weights, busy_baseline=busy_baseline)
     options = engine.select_route_options(ranked, wind, ride_type, target_km,
                                           n_alternatives=n_alternatives)
     return PlanResult(location_label=label, when=when, wind=wind, zone=zone,

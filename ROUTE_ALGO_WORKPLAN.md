@@ -172,6 +172,14 @@ convex penalty can't distinguish.
 
 ## Task 4 — Volume-first safety/quiet (reframe, not rebuild)
 
+> **STATUS: 4a DONE (2026-06-15); 4b deferred to Task 5.** 4a: `evaluate(busy_baseline=)` charges
+> the arterial penalty only ABOVE the corridor's unavoidable level (min `busy_frac` across
+> candidates), so where the quietest roads are unavoidably busy the relatively-quietest still wins.
+> `plan_routes` sets the baseline only under `--classify`; default 0.0 -> absolute penalty,
+> byte-identical. Note added when arterials look unavoidable. Tests in `tests/test_weights.py`
+> (default==absolute, unavoidable-unpenalized, still-picks-quietest). 4b (real AADT) is an optional
+> per-region provider — built on Task 5's registry, so deferred to land there. **Next: Task 5.**
+
 **Goal:** generalize the busy penalty around traffic **volume** (the dominant risk + annoyance
 signal for this rider), without importing a casual-rider stress model.
 

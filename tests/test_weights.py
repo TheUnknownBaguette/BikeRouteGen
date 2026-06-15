@@ -181,11 +181,11 @@ _WIND = engine.Wind(direction_from_deg=200.0, speed_mph=10.0, gust_mph=15.0,
                     valid_time="")
 
 
-def _cand(unpaved=0.0, good=0.0, unrideable=0.0):
+def _cand(unpaved=0.0, good=0.0, unrideable=0.0, busy=0.0):
     return engine.Candidate(coords=list(_COORDS), distance_km=30.0, ascent_m=50.0,
                             paved_frac=1.0 - unpaved, unpaved_frac=unpaved,
                             shape="loop", good_gravel_frac=good,
-                            unrideable_frac=unrideable)
+                            unrideable_frac=unrideable, busy_frac=busy)
 
 
 def _score(c, ride_type):
@@ -207,6 +207,38 @@ def test_unrideable_demotes_both_ride_types():
         clean = _score(_cand(unpaved=0.4), rt)
         muddy = _score(_cand(unpaved=0.4, unrideable=0.3), rt)
         assert muddy < clean, rt           # mud/ground hard-avoided for both
+
+
+# --- corridor-normalized busy (Task 4a) ------------------------------------ #
+def test_busy_baseline_default_is_absolute():
+    w = engine.weights_for(None, "road")
+    a = _cand(busy=0.3)
+    engine.evaluate([a], _WIND, "road", 30.0, 3.0, weights=w, busy_baseline=0.0)
+    absolute = a.total_score
+    b = _cand(busy=0.3)
+    engine.evaluate([b], _WIND, "road", 30.0, 3.0, weights=w)   # default baseline
+    assert b.total_score == absolute      # default 0.0 == absolute penalty
+
+
+def test_busy_baseline_unpenalizes_unavoidable():
+    w = engine.weights_for(None, "road")
+    # absolute: a 50%-arterial route is heavily penalized
+    abs_c = _cand(busy=0.5)
+    engine.evaluate([abs_c], _WIND, "road", 30.0, 3.0, weights=w, busy_baseline=0.0)
+    # normalized: if 0.5 is the unavoidable corridor floor, it's no longer charged
+    norm_c = _cand(busy=0.5)
+    engine.evaluate([norm_c], _WIND, "road", 30.0, 3.0, weights=w, busy_baseline=0.5)
+    assert norm_c.total_score > abs_c.total_score
+
+
+def test_busy_normalization_still_picks_quietest_available():
+    # every route is somewhat busy; the relatively quietest must still win
+    w = engine.weights_for(None, "road")
+    quiet, busier = _cand(busy=0.4), _cand(busy=0.7)
+    baseline = min(quiet.busy_frac, busier.busy_frac)   # 0.4 unavoidable
+    ranked = engine.evaluate([busier, quiet], _WIND, "road", 30.0, 3.0,
+                             weights=w, busy_baseline=baseline)
+    assert ranked[0] is quiet                            # quietest available on top
 
 
 def test_good_gravel_bonus_gravel_only():
