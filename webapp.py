@@ -239,6 +239,7 @@ def plan():
     ranked_rows = [{
         "shape": c.shape, "dist_mi": c.distance_km * to_mi, "dist_km": c.distance_km,
         "ascent_m": c.ascent_m, "gravel_pct": c.unpaved_frac * 100,
+        "unrideable_pct": c.unrideable_frac * 100,
         "hwy_pct": c.busy_frac * 100, "path_pct": c.path_frac * 100,
         "cross": c.self_intersections, "score": c.total_score,
         "verdict": ("into wind" if c.wind_score > 0.2
