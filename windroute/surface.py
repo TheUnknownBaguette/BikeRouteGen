@@ -89,6 +89,30 @@ def _is_bikelane(tags: dict) -> bool:
     return False
 
 
+# Gravel QUALITY buckets (work-plan Task 3c). "good" gravel is pleasant to ride;
+# "bad" is effectively unrideable on skinny-ish tyres and is hard-avoided for BOTH
+# ride types (you don't want deep mud/loose ground on a road OR a gravel ride).
+GOOD_GRAVEL_SURFACES = {"fine_gravel", "compacted"}
+UNRIDEABLE_SURFACES = {"ground", "mud", "sand"}
+UNRIDEABLE_SMOOTHNESS = {"very_bad", "horrible", "very_horrible", "impassable"}
+
+
+def classify_quality_tags(tags: dict) -> str | None:
+    """'good' (nice gravel) / 'bad' (unrideable) / None, from finer OSM tags.
+
+    Bad wins over good (safety first): a way tagged both ways reads as bad. Driven
+    by `surface` subtype, `tracktype` grade, and `smoothness`.
+    """
+    surf = (tags.get("surface") or "").lower()
+    tt = (tags.get("tracktype") or "").lower()
+    sm = (tags.get("smoothness") or "").lower()
+    if surf in UNRIDEABLE_SURFACES or tt == "grade5" or sm in UNRIDEABLE_SMOOTHNESS:
+        return "bad"
+    if surf in GOOD_GRAVEL_SURFACES or tt in {"grade2", "grade3"}:
+        return "good"
+    return None
+
+
 def classify_tags(tags: dict) -> str | None:
     """'paved' / 'unpaved' / None(unknown) from a way's OSM tags."""
     surf = (tags.get("surface") or "").lower()
@@ -164,9 +188,11 @@ class OverpassSurface:
         self._grid: dict | None = None      # cell -> [(cls, a, b), ...]  (surface)
         self._bike_grid: dict | None = None  # cell -> [(True, a, b), ...] (bike lanes)
         self._way_grid: dict | None = None   # cell -> [(kind, a, b), ...] (busy/path)
+        self._quality_grid: dict | None = None  # cell -> [(qual, a, b), ...] (good/bad)
         self.way_count = 0
         self.bikelane_count = 0
         self.waytype_count = 0
+        self.quality_count = 0
 
     # -- index construction -------------------------------------------------- #
     def build(self, coords_lists):
@@ -202,13 +228,15 @@ class OverpassSurface:
         grid: dict = {}
         bike_grid: dict = {}
         way_grid: dict = {}
-        count = bike_count = waytype_count = 0
+        quality_grid: dict = {}
+        count = bike_count = waytype_count = quality_count = 0
         for el in elements:
             tags = el.get("tags", {})
             cls = classify_tags(tags)
             is_lane = _is_bikelane(tags)
             kind = _waytype_kind(tags)
-            if cls is None and not is_lane and kind is None:
+            qual = classify_quality_tags(tags)
+            if cls is None and not is_lane and kind is None and qual is None:
                 continue
             geom = el.get("geometry") or []
             if len(geom) < 2:
@@ -221,19 +249,25 @@ class OverpassSurface:
                     self._add_segment(bike_grid, (True, a, b))
                 if kind is not None:
                     self._add_segment(way_grid, (kind, a, b))
+                if qual is not None:
+                    self._add_segment(quality_grid, (qual, a, b))
             if cls is not None:
                 count += 1
             if is_lane:
                 bike_count += 1
             if kind is not None:
                 waytype_count += 1
+            if qual is not None:
+                quality_count += 1
 
         self._grid = grid
         self._bike_grid = bike_grid
         self._way_grid = way_grid
+        self._quality_grid = quality_grid
         self.way_count = count
         self.bikelane_count = bike_count
         self.waytype_count = waytype_count
+        self.quality_count = quality_count
         return self
 
     def _cell(self, lat, lng):
@@ -342,6 +376,44 @@ class OverpassSurface:
         if total <= 0:
             return None
         return best / total
+
+    def classify_quality(self, coords):
+        """Return (good_gravel_frac, unrideable_frac) or None if no quality index.
+
+        Quality grading (work-plan Task 3c): good gravel (fine_gravel/compacted/
+        tracktype grade2-3) is pleasant; "bad" (mud/ground/sand/grade5/awful
+        smoothness) is effectively unrideable and hard-avoided for both ride types.
+        Fractions are over the whole route, so they sum to <= 1 (the rest is
+        unknown-quality or paved).
+        """
+        if not self._quality_grid:
+            return None
+        total = good = bad = 0.0
+        for a, b in zip(coords, coords[1:]):
+            d = _haversine_km(a, b)
+            if d <= 0:
+                continue
+            total += d
+            mid = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+            q = self._nearest_quality(mid)
+            if q == "good":
+                good += d
+            elif q == "bad":
+                bad += d
+        if total <= 0:
+            return None
+        return good / total, bad / total
+
+    def _nearest_quality(self, p):
+        ci, cj = self._cell(*p)
+        best_d, best_q = self.match_threshold_m, None
+        for di in (-1, 0, 1):
+            for dj in (-1, 0, 1):
+                for q, a, b in self._quality_grid.get((ci + di, cj + dj), ()):
+                    dist = _pt_seg_dist_m(p, a, b)
+                    if dist < best_d:
+                        best_d, best_q = dist, q
+        return best_q
 
     def _nearest_kind(self, p):
         ci, cj = self._cell(*p)

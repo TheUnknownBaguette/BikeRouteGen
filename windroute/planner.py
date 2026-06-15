@@ -80,7 +80,7 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
     # default shape set adapt to the terrain. When classify is off, archetype is
     # None and every *_for(None) returns the grid-farmland baseline, so behaviour
     # (and the grid-farmland row) is byte-identical to before.
-    weights = engine.weights_for(archetype)
+    weights = engine.weights_for(archetype, ride_type)
     loop_geom = engine.loop_geom_for(archetype)
     shape_list = engine.shapes_for(archetype, shape_list)
     if archetype and archetype not in ("grid-farmland", "unknown"):
@@ -178,7 +178,7 @@ def _apply_osm_surface(cands):
         return f"surface: OSM lookup failed ({exc}); kept ORS surface"
     if not src.way_count and not src.bikelane_count:
         return "surface: no OSM surface tags in this area; kept ORS surface"
-    refined = lanes = 0
+    refined = lanes = bad = 0
     for c in cands:
         res = src.classify(c.coords)
         if res:
@@ -189,9 +189,18 @@ def _apply_osm_surface(cands):
             c.bikelane_frac = lane
             if lane > 0:
                 lanes += 1
-    return (f"surface: OSM/Overpass ({src.way_count} tagged ways, "
+        qual = src.classify_quality(c.coords)
+        if qual is not None:
+            c.good_gravel_frac, c.unrideable_frac = qual
+            if c.unrideable_frac > 0:
+                bad += 1
+    note = (f"surface: OSM/Overpass ({src.way_count} tagged ways, "
             f"{refined}/{len(cands)} loops refined; "
             f"{src.bikelane_count} bike-lane ways, {lanes} routes use one)")
+    if src.quality_count:
+        note += (f"; quality graded ({src.quality_count} ways, "
+                 f"{bad} routes touch unrideable surface)")
+    return note
 
 
 def _compare_surface(cands):
@@ -216,6 +225,9 @@ def _compare_surface(cands):
         lane = src.classify_bikelane(c.coords)
         if lane is not None:
             c.bikelane_frac = lane
+        qual = src.classify_quality(c.coords)
+        if qual is not None:
+            c.good_gravel_frac, c.unrideable_frac = qual
         res = src.classify(c.coords)
         if not res:
             continue

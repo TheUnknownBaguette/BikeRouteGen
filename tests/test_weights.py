@@ -16,12 +16,15 @@ from windroute import engine, zones
 
 # --- route weights --------------------------------------------------------- #
 def test_grid_farmland_weights_equal_constants():
-    """grid-farmland RouteWeights == the module constants (byte-identical scoring)."""
-    w = engine.weights_for("grid-farmland")
+    """grid-farmland ROAD RouteWeights == the module constants (byte-identical)."""
+    w = engine.weights_for("grid-farmland")          # default ride_type="road"
     assert w.wind_scale == 1.0
+    assert w.w_wind == 1.0                            # base road wind weight
     assert w.w_dist == 0.5
     assert w.road_gravel_lin == engine.W_ROAD_GRAVEL_LIN
     assert w.road_gravel_quad == engine.W_ROAD_GRAVEL_QUAD
+    assert w.gravel_seek == 0.0                       # road never SEEKS gravel
+    assert w.w_good_gravel == 0.0
     assert w.w_busy == engine.W_BUSY
     assert w.busy_free_frac == engine.BUSY_FREE_FRAC
     assert w.w_path == engine.W_PATH
@@ -29,6 +32,42 @@ def test_grid_farmland_weights_equal_constants():
     assert w.w_bikelane == engine.W_BIKELANE
     assert w.w_tidy == engine.W_TIDY
     assert w.tidy_free_per_km == engine.TIDY_FREE_PER_KM
+
+
+# --- road/gravel asymmetry (Task 3a/3b) ------------------------------------ #
+def test_road_profile_penalizes_gravel():
+    w = engine.ROAD_WEIGHTS
+    assert w.road_gravel_lin > 0 and w.road_gravel_quad > 0
+    assert w.gravel_seek == 0.0                       # no seek reward on road
+
+
+def test_gravel_profile_seeks_gravel():
+    w = engine.GRAVEL_WEIGHTS
+    assert w.gravel_seek > 0                          # rewards unpaved
+    assert w.road_gravel_lin == 0 and w.road_gravel_quad == 0   # no penalty
+    assert w.w_wind < engine.ROAD_WEIGHTS.w_wind      # wind matters less on gravel
+    assert w.w_good_gravel > 0                         # bonus for good gravel
+
+
+def test_weights_for_gravel_selects_gravel_profile():
+    assert engine.weights_for("grid-farmland", "gravel").gravel_seek > 0
+    assert engine.weights_for(None, "gravel").road_gravel_lin == 0
+    # archetype tuning still composes onto the gravel base
+    assert engine.weights_for("mountain", "gravel").wind_scale < 1.0
+
+
+def test_unrideable_hard_avoid_both_ride_types():
+    assert engine.weights_for("grid-farmland", "road").w_unrideable > 0
+    assert engine.weights_for("grid-farmland", "gravel").w_unrideable > 0
+
+
+def test_seek_curve_band():
+    f = engine._gravel_seek_reward
+    assert f(0.0, 0.5, 0.75) == 0.0
+    assert f(0.3, 0.5, 0.75) == 0.6                   # ramps (0.3/0.5)
+    assert f(0.5, 0.5, 0.75) == 1.0                   # full at band start
+    assert f(0.7, 0.5, 0.75) == 1.0                   # holds across band
+    assert 0.7 <= f(0.95, 0.5, 0.75) < 1.0            # gentle taper above, floored
 
 
 def test_weights_for_defaults_to_grid_farmland():
@@ -135,6 +174,47 @@ def test_evaluate_mountain_changes_scores():
     s_none = sorted(c.total_score for c in r_none)
     s_mtn = sorted(c.total_score for c in r_mtn)
     assert s_none != s_mtn      # archetype tuning actually moves the numbers
+
+
+_COORDS = [(41.0, -88.0), (41.05, -88.0), (41.05, -88.05)]
+_WIND = engine.Wind(direction_from_deg=200.0, speed_mph=10.0, gust_mph=15.0,
+                    valid_time="")
+
+
+def _cand(unpaved=0.0, good=0.0, unrideable=0.0):
+    return engine.Candidate(coords=list(_COORDS), distance_km=30.0, ascent_m=50.0,
+                            paved_frac=1.0 - unpaved, unpaved_frac=unpaved,
+                            shape="loop", good_gravel_frac=good,
+                            unrideable_frac=unrideable)
+
+
+def _score(c, ride_type):
+    engine.evaluate([c], _WIND, ride_type, 30.0, 3.0,
+                    weights=engine.weights_for(None, ride_type))
+    return c.total_score
+
+
+def test_gravel_ride_seeks_gravel_road_avoids():
+    hi, lo = _cand(unpaved=0.6), _cand(unpaved=0.05)
+    # gravel ride: the gravelly route wins
+    assert _score(hi, "gravel") > _score(_cand(unpaved=0.05), "gravel")
+    # road ride: the paved route wins (penalty, not reward)
+    assert _score(_cand(unpaved=0.05), "road") > _score(_cand(unpaved=0.6), "road")
+
+
+def test_unrideable_demotes_both_ride_types():
+    for rt in ("road", "gravel"):
+        clean = _score(_cand(unpaved=0.4), rt)
+        muddy = _score(_cand(unpaved=0.4, unrideable=0.3), rt)
+        assert muddy < clean, rt           # mud/ground hard-avoided for both
+
+
+def test_good_gravel_bonus_gravel_only():
+    plain = _score(_cand(unpaved=0.4), "gravel")
+    good = _score(_cand(unpaved=0.4, good=0.4), "gravel")
+    assert good > plain                     # confirmed good gravel is a bonus
+    # road ride ignores the good-gravel bonus
+    assert _score(_cand(unpaved=0.4), "road") == _score(_cand(unpaved=0.4, good=0.4), "road")
 
 
 def _run():

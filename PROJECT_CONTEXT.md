@@ -148,6 +148,27 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   (grid-farmland == constants, default path identical, mountain drops rectangle, etc.); live-verified
   that per-archetype zone scoring shifts the chosen direction (forest/coast vs farmland). **Non-grid
   rows are a deliberately conservative FIRST PASS — calibrate against real rides later (Task 8).**
+- **Road vs. gravel asymmetry** (work-plan Task 3 — DONE): ride type is now a first-class weight
+  profile, and `evaluate` has **no ride-type `if` in its formula** — it's fully weights-driven.
+  - **3a Two profiles:** `engine.ROAD_WEIGHTS` / `GRAVEL_WEIGHTS`; `engine.as_gravel(rw)` derives the
+    gravel profile from any road one (so archetype tuning still composes). `w_wind` is now a
+    RouteWeights field (road 1.0 / gravel 0.55 — wind matters less on gravel). `weights_for(archetype,
+    ride_type)` picks + transforms.
+  - **3b Gravel-seek reward:** road keeps the convex gravel **penalty**; gravel swaps it for a
+    **seek reward** (`engine._gravel_seek_reward`): ramps to full by `gravel_seek_lo` (0.5), holds
+    across the band to `gravel_seek_hi` (0.75), then tapers (floored at 0.7) — so a ~30% gravel area
+    still returns a sane route. No-op on road rides (`gravel_seek=0`).
+  - **3c Quality grading:** `surface.classify_quality_tags` + `OverpassSurface.classify_quality`
+    bucket OSM `surface`/`tracktype`/`smoothness` into **good** gravel (fine_gravel/compacted/grade2-3,
+    a gravel-ride bonus) and **bad/unrideable** (mud/ground/sand/grade5/awful smoothness), the latter
+    **hard-avoided for BOTH ride types** (`w_unrideable=2.5`). New `Candidate.good_gravel_frac` /
+    `unrideable_frac`, set by the planner's OSM surface steps. Live-verified: a route on a good-tagged
+    way reads (1.0, 0.0); on a bad-tagged way (0.0, 1.0).
+  - **Regression-safe:** the grid-farmland ROAD profile is unchanged (gravel-seek/good/unrideable
+    terms are 0 there, and `unrideable_frac` is 0 without OSM quality data), so the default road path
+    stays byte-identical. Quality grading only bites under `--surface-source osm|both` (like bike
+    lanes). Gravel scoring DID change (it was never validated — only road rides were). Display: CLI
+    table flags good gravel `+Ng` / unrideable `!N`, option reasons + web cards/table show them.
 - **Wind scoring:** `wind_score` rewards headwind on first half / tailwind home.
 - **Distance tolerance:** `-t/--tolerance` free buffer band; only excess is penalized.
 - **Elevation fix:** `engine._smoothed_ascent` (interpolate SRTM nodata, median +

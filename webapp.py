@@ -229,6 +229,8 @@ def plan():
             "ascent_m": c.ascent_m, "verdict": verdict,
             "gravel_pct": c.unpaved_frac * 100, "hwy_pct": c.busy_frac * 100,
             "path_pct": c.path_frac * 100, "lane_pct": c.bikelane_frac * 100,
+            "good_gravel_pct": c.good_gravel_frac * 100,
+            "unrideable_pct": c.unrideable_frac * 100,
             "cross": c.self_intersections,
             "png": f"out/{base.name}.png", "gpx": f"{base.name}.gpx",
             "dlname": f"{dlnames[i]}.gpx",

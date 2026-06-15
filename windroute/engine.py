@@ -5,7 +5,7 @@ import math
 import re
 import time
 import datetime as dt
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import requests
 
@@ -94,6 +94,8 @@ class Candidate:
                                 # (the connector-vs-destination signal: a short run is a
                                 # trail used to link roads; a long run is "riding the path")
     bikelane_frac: float = 0.0  # fraction on roads with an on-road bike lane (OSM only)
+    good_gravel_frac: float = 0.0  # fraction on confirmed GOOD gravel (OSM quality; Task 3c)
+    unrideable_frac: float = 0.0   # fraction on unrideable surface (mud/ground/grade5; OSM only)
     surface_by_source: dict = field(default_factory=dict)  # source name -> unpaved_frac
     score_coords: list = None   # subset of coords the wind score uses (staging: the
                                 # destination loop only, so the fixed transit legs to/from
@@ -1228,22 +1230,37 @@ TIDY_OPTION_MAX_PER_KM = 0.25
 
 
 # --------------------------------------------------------------------------- #
-# Archetype-keyed tuning (work-plan Task 2)
+# Archetype- + ride-type-keyed tuning (work-plan Tasks 2 + 3)
 # --------------------------------------------------------------------------- #
-# The weights above were tuned for ONE place (flat IL grid-farmland, 108 real
-# rides). To let the scorer travel, the route-scoring tunables live in a
-# `RouteWeights` record, and `WEIGHTS_BY_ARCHETYPE` swaps the record by terrain
-# archetype (from `regions.classify_region`). The `grid-farmland` row is built
-# straight from the constants above, so it is byte-identical to today and the
-# default path (no classification, or `unknown`) reproduces current behaviour
-# exactly. Non-grid rows are a deliberately conservative FIRST PASS — calibrate
-# against real rides later (work-plan Task 8). Every number is a one-line edit.
+# The weights above were tuned for ONE place + ride type (flat IL grid-farmland
+# ROAD rides, 108 real trips). To let the scorer travel, the route-scoring
+# tunables live in a `RouteWeights` record. Two axes vary it:
+#   - ride type: `ROAD_WEIGHTS` vs `GRAVEL_WEIGHTS` (Task 3a). Road PENALIZES
+#     gravel; gravel SEEKS it (a target-band reward, Task 3b). Gravel also rides a
+#     lower base wind weight (terrain/surface matter more than the wind line).
+#   - archetype: `WEIGHTS_BY_ARCHETYPE` (Task 2), overlaid on the ride-type base.
+# The `grid-farmland` ROAD row is built straight from the constants above, so it is
+# byte-identical to today, and the default path (no classification / `unknown`,
+# road) reproduces current behaviour exactly. `evaluate` reads only this record —
+# no ride-type `if` in the formula. Non-grid / gravel rows are a conservative FIRST
+# PASS — calibrate against real rides later (work-plan Task 8).
 @dataclass(frozen=True)
 class RouteWeights:
-    """The route-scoring tunables `evaluate` reads, swappable per archetype."""
-    wind_scale: float = 1.0            # multiplies the ride-type base wind weight
+    """The route-scoring tunables `evaluate` reads, swappable per archetype/ride."""
+    wind_scale: float = 1.0            # archetype multiplier on the base wind weight
+    w_wind: float = 1.0                # base wind weight (road 1.0 / gravel lower)
+    # Road gravel PENALTY (linear + convex on confirmed unpaved). 0 for gravel.
     road_gravel_lin: float = W_ROAD_GRAVEL_LIN
     road_gravel_quad: float = W_ROAD_GRAVEL_QUAD
+    # Gravel SEEK reward (Task 3b): weight + target band for diminishing returns.
+    # 0 for road rides (so it's a no-op there).
+    gravel_seek: float = 0.0
+    gravel_seek_lo: float = 0.5        # reward ramps to full by this unpaved frac
+    gravel_seek_hi: float = 0.75       # ... holds to here, then gently tapers
+    w_good_gravel: float = 0.0         # bonus for CONFIRMED good gravel (gravel only)
+    # Hard-avoid unrideable surface (mud/ground/grade5) for BOTH ride types (3c).
+    # Only bites when OSM quality data was consulted (unrideable_frac else 0).
+    w_unrideable: float = 2.5
     w_dist: float = 0.5                # distance-excess penalty coefficient
     w_busy: float = W_BUSY
     busy_free_frac: float = BUSY_FREE_FRAC
@@ -1254,8 +1271,26 @@ class RouteWeights:
     tidy_free_per_km: float = TIDY_FREE_PER_KM
 
 
-# grid-farmland == today's constants (single source of truth, byte-identical).
+# grid-farmland ROAD == today's constants (single source of truth, byte-identical).
 _GRID_FARMLAND_WEIGHTS = RouteWeights()
+
+
+def as_gravel(rw: RouteWeights) -> RouteWeights:
+    """Turn a road weight profile into its gravel counterpart (Task 3a/3b).
+
+    Swaps the gravel PENALTY for a SEEK reward, lowers the base wind weight, and
+    rewards confirmed good gravel — while keeping the archetype's other tuning
+    (wind_scale, path/lane/busy/tidy, hard-avoid). A no-op-preserving transform:
+    road-only fields go to 0, gravel-only fields turn on.
+    """
+    return replace(rw, w_wind=0.55, road_gravel_lin=0.0, road_gravel_quad=0.0,
+                   gravel_seek=1.2, w_good_gravel=0.3)
+
+
+# Named grid-farmland base profiles per ride type (the work plan's "first-class
+# vectors"). Archetype variation is overlaid by `weights_for`.
+ROAD_WEIGHTS = _GRID_FARMLAND_WEIGHTS
+GRAVEL_WEIGHTS = as_gravel(ROAD_WEIGHTS)
 
 WEIGHTS_BY_ARCHETYPE = {
     "grid-farmland": _GRID_FARMLAND_WEIGHTS,
@@ -1306,10 +1341,17 @@ SHAPES_BY_ARCHETYPE = {
 }
 
 
-def weights_for(archetype) -> RouteWeights:
-    """RouteWeights for an archetype (None / unmapped -> grid-farmland baseline)."""
-    return WEIGHTS_BY_ARCHETYPE.get(archetype or "grid-farmland",
+def weights_for(archetype, ride_type="road") -> RouteWeights:
+    """RouteWeights for an (archetype, ride_type).
+
+    Picks the archetype's road profile (None / unmapped -> grid-farmland baseline),
+    then for a gravel ride transforms it with `as_gravel`. `weights_for(None,
+    "road")` is the grid-farmland baseline object (identity preserved), so the
+    default road path stays byte-identical.
+    """
+    base = WEIGHTS_BY_ARCHETYPE.get(archetype or "grid-farmland",
                                     _GRID_FARMLAND_WEIGHTS)
+    return as_gravel(base) if str(ride_type).lower().strip() == "gravel" else base
 
 
 def loop_geom_for(archetype):
@@ -1334,6 +1376,23 @@ def shapes_for(archetype, requested):
     return out or list(requested) or ["loop"]
 
 
+def _gravel_seek_reward(unpaved_frac, lo, hi):
+    """Diminishing-returns reward for riding gravel (Task 3b), in ~[0, 1].
+
+    Rises linearly to full by `lo`, holds across the target band [lo, hi], then
+    tapers gently above `hi` (floored, never to 0) so a mostly-gravel route is
+    still good but not infinitely better — and an area that only offers ~30% gravel
+    still earns a solid reward (a sane route comes back instead of nothing)."""
+    u = unpaved_frac
+    if u <= 0:
+        return 0.0
+    if u < lo:
+        return u / lo if lo > 0 else 1.0
+    if u <= hi:
+        return 1.0
+    return max(0.7, 1.0 - (u - hi))          # gentle taper above the band
+
+
 def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
              tolerance_km: float = 0.0, weights: "RouteWeights" = None):
     """Score every candidate and return them sorted best-first.
@@ -1350,23 +1409,27 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
     constants) lets the caller pass an archetype-tuned set; `None` reproduces
     current behaviour exactly.
     """
-    w = weights or _GRID_FARMLAND_WEIGHTS
+    w = weights or weights_for(None, ride_type)
     into = wind.into_wind_bearing
     for c in candidates:
         c.wind_score = wind_score(c.score_coords or c.coords, into)
         wind_norm = (c.wind_score + 2.0) / 4.0           # -> ~0..1
 
-        if ride_type == "gravel":
-            c.surface_score = c.unpaved_frac             # seek gravel
-            w_wind = 0.4                                  # gravel dominates, wind secondary
-            surf_term = 1.0 * c.surface_score            # reward unpaved
-        else:
-            c.surface_score = c.paved_frac               # avoid gravel
-            w_wind = 1.0
-            # steep, ramping penalty on KNOWN gravel; small amounts are tolerable,
-            # a half-gravel route loses more than the entire wind range can make up.
-            surf_term = -(w.road_gravel_lin * c.unpaved_frac
-                          + w.road_gravel_quad * c.unpaved_frac ** 2)
+        # `surface_score` is the display figure (paved on road / unpaved on gravel);
+        # the SCORING is fully weights-driven, no ride-type branch in the formula.
+        c.surface_score = c.unpaved_frac if ride_type == "gravel" else c.paved_frac
+        # Road: a steep, ramping penalty on KNOWN gravel (0 weight on gravel rides).
+        # Gravel: a diminishing-returns SEEK reward + a bonus for confirmed good
+        # gravel (0 weight on road rides). Both ride types hard-avoid unrideable
+        # surface (mud/ground/grade5; unrideable_frac is 0 without OSM quality data,
+        # so road grid-farmland stays byte-identical).
+        surf_term = (w.gravel_seek * _gravel_seek_reward(c.unpaved_frac,
+                                                         w.gravel_seek_lo,
+                                                         w.gravel_seek_hi)
+                     + w.w_good_gravel * c.good_gravel_frac
+                     - (w.road_gravel_lin * c.unpaved_frac
+                        + w.road_gravel_quad * c.unpaved_frac ** 2)
+                     - w.w_unrideable * c.unrideable_frac)
 
         excess = max(0.0, abs(c.distance_km - target_km) - tolerance_km)
         dist_penalty = -excess / max(target_km, 1.0)
@@ -1382,7 +1445,7 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
         c.self_intersections = _self_intersections(geom)
         tidy_penalty = -max(0.0, c.self_intersections / max(_polyline_km(geom), 1.0)
                             - w.tidy_free_per_km)
-        c.total_score = ((w_wind * w.wind_scale * wind_norm) + surf_term
+        c.total_score = ((w.w_wind * w.wind_scale * wind_norm) + surf_term
                          + (w.w_dist * dist_penalty) + (w.w_busy * busy_penalty)
                          + (w.w_path * path_penalty) + (w.w_bikelane * lane_bonus)
                          + (w.w_tidy * tidy_penalty))
@@ -1426,11 +1489,14 @@ def explain(best: Candidate, wind: Wind, ride_type: str) -> str:
     else:
         bits.append("wind is roughly neutral around the loop")
     if ride_type == "gravel":
-        bits.append(f"{best.unpaved_frac * 100:.0f}% unpaved")
+        gq = (f", {best.good_gravel_frac * 100:.0f}% good" if best.good_gravel_frac else "")
+        bits.append(f"{best.unpaved_frac * 100:.0f}% unpaved{gq}")
     elif best.unpaved_frac < 0.01:
         bits.append("no known gravel")
     else:
         bits.append(f"{best.unpaved_frac * 100:.0f}% known gravel")
+    if best.unrideable_frac > 0:
+        bits.append(f"{best.unrideable_frac * 100:.0f}% unrideable surface")
     if best.busy_frac <= BUSY_FREE_FRAC:
         bits.append("stays on quiet roads")
     else:
@@ -1529,9 +1595,12 @@ def _option_reasons(c: Candidate, wind: Wind, ride_type: str, lead: str = None):
     if lead != "distance":
         reasons.append(f"{c.distance_km:.1f} km, +{c.ascent_m:.0f} m")
     if ride_type == "gravel":
-        reasons.append(f"{c.unpaved_frac * 100:.0f}% unpaved")
+        gq = (f" ({c.good_gravel_frac * 100:.0f}% good)" if c.good_gravel_frac else "")
+        reasons.append(f"{c.unpaved_frac * 100:.0f}% unpaved{gq}")
     elif c.unpaved_frac >= 0.01 and lead != "quiet":
         reasons.append(f"{c.unpaved_frac * 100:.0f}% known gravel")
+    if c.unrideable_frac > 0:
+        reasons.append(f"{c.unrideable_frac * 100:.0f}% unrideable surface (avoided)")
     if lead != "quiet" and c.busy_frac > BUSY_FREE_FRAC:
         reasons.append(f"{c.busy_frac * 100:.0f}% on busy highways")
     if lead != "lanes" and c.bikelane_frac >= 0.05:

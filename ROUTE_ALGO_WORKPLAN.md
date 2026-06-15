@@ -134,6 +134,17 @@ snap to the curvy real graph instead of cutting across nothing.
 
 ## Task 3 — Road vs. gravel asymmetry
 
+> **STATUS: DONE (2026-06-15).** 3a: `engine.ROAD_WEIGHTS`/`GRAVEL_WEIGHTS` + `as_gravel()`;
+> `w_wind` is now a RouteWeights field (road 1.0 / gravel 0.55); `weights_for(archetype, ride_type)`.
+> 3b: `_gravel_seek_reward` (target band 0.5–0.75 + taper), road keeps the convex penalty, gravel
+> swaps to the reward. 3c: `surface.classify_quality_tags` + `OverpassSurface.classify_quality`
+> (good vs unrideable), new `Candidate.good_gravel_frac`/`unrideable_frac`, hard-avoid unrideable
+> (`w_unrideable=2.5`) for BOTH ride types. `evaluate` is now fully weights-driven (no ride-type if).
+> Regression-safe: grid-farmland ROAD byte-identical (gravel/quality terms 0 without OSM). Tests:
+> `tests/test_weights.py` (gravel seeks / road avoids / unrideable demotes both / seek curve) +
+> `tests/test_surface_quality.py`; live-verified quality grading (good→(1,0), bad→(0,1)). Display
+> updated (CLI table flags, reasons, web). **Next: Task 4.**
+
 ### 3a. Two real weight profiles
 Make `ROAD_WEIGHTS` and `GRAVEL_WEIGHTS` first-class vectors; ride type selects one (you already
 branch on ride type for display). Key delta: `w_wind` road `1.0` / gravel `~0.5–0.6`. Road keeps

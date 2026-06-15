@@ -769,12 +769,20 @@ def _candidates_table(ranked, ride_type, compare=False, show_lane=False):
                 check = "[green]ok[/]"
             row += [ors_cell, osm_cell, check]
         elif ride_type == "gravel":
-            row.append(f"{c.unpaved_frac * 100:.0f}")        # more is better
+            cell = f"{c.unpaved_frac * 100:.0f}"              # more is better
+            if c.good_gravel_frac:                            # confirmed good gravel
+                cell += f" [green]+{c.good_gravel_frac * 100:.0f}g[/]"
+            if c.unrideable_frac:                             # unrideable % (avoided)
+                cell += f" [red]!{c.unrideable_frac * 100:.0f}[/]"
+            row.append(cell)
         else:
             g = c.unpaved_frac * 100                          # confirmed gravel; less is better
-            row.append(f"{g:.0f}" if c.unpaved_frac < 0.15
-                       else f"[yellow]{g:.0f}[/]" if c.unpaved_frac < 0.35
-                       else f"[red]{g:.0f}[/]")
+            cell = (f"{g:.0f}" if c.unpaved_frac < 0.15
+                    else f"[yellow]{g:.0f}[/]" if c.unpaved_frac < 0.35
+                    else f"[red]{g:.0f}[/]")
+            if c.unrideable_frac:
+                cell += f" [red]!{c.unrideable_frac * 100:.0f}[/]"
+            row.append(cell)
         hwy_pct = c.busy_frac * 100
         hwy_cell = (f"{hwy_pct:.0f}" if c.busy_frac <= engine.BUSY_FREE_FRAC
                     else f"[yellow]{hwy_pct:.0f}[/]" if c.busy_frac < 0.20

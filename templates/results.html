@@ -48,7 +48,7 @@
           <td>{{ loop.index }}</td><td>{{ c.shape }}</td><td class="muted">{{ c.verdict }}</td>
           <td>{{ '%.1f'|format(c.dist_mi) }}</td><td>{{ '%.1f'|format(c.dist_km) }}</td>
           <td>{{ '%.0f'|format(c.ascent_m) }}</td>
-          <td>{{ '%.0f'|format(c.gravel_pct) }}</td><td>{{ '%.0f'|format(c.hwy_pct) }}</td>
+          <td>{{ '%.0f'|format(c.gravel_pct) }}{% if c.unrideable_pct > 0 %} <span style="color:var(--warn)" title="unrideable surface">!{{ '%.0f'|format(c.unrideable_pct) }}</span>{% endif %}</td><td>{{ '%.0f'|format(c.hwy_pct) }}</td>
           <td>{{ '%.0f'|format(c.path_pct) }}</td><td>{{ c.cross }}</td>
           <td>{{ '%.2f'|format(c.score) }}</td>
         </tr>
