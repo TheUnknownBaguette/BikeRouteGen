@@ -25,11 +25,17 @@ wind while fresh and get the tailwind home**.
    genuinely different ride. Files: `route.png/.gpx` (pick), `route-alt1.*`,
    `route-alt2.*`.
 5. Optionally **stages** the ride to quieter country (`--ride-area`): transit to
-   the nearest good quiet riding zone, loop on the wind there, ride home.
+   the nearest good quiet riding zone — or one in a compass direction you choose
+   (e.g. `south`) — loop on the wind there, and ride home.
 
 ---
 
 ## First-time setup (PowerShell)
+
+> **Only want the web app?** You can skip steps 2–3 below — `run.bat` builds the
+> virtual environment and installs dependencies for you the first time you launch
+> it. You just need [Python](https://www.python.org/downloads/) on your PATH and an
+> OpenRouteService key (steps 4–5). The full setup here is for the command line.
 
 Run these once. They assume you're in the project folder.
 
@@ -70,15 +76,21 @@ picks it up automatically** — you don't set it again.
 
 After the one-time setup above, you can skip PowerShell entirely:
 
-**Double-click `run.bat`.** It starts a local server and opens your browser to
-`http://127.0.0.1:5000`. Fill in the form (start point, distance, time, ride type —
-plus an "advanced" block for shapes, surface source, ride-area staging), hit **Plan
-my routes**, and you get the recommended route plus two alternatives, each with its
-map shown inline and a GPX download button. A plan takes ~20–40 s (it's calling the
-routing + wind services, same as the CLI).
+**Double-click `run.bat`.** On first run (or on a new machine) it builds the local
+Python environment for you, then starts a local server and opens your browser to
+`http://127.0.0.1:5000`. Fill in the form — the **start point** autocompletes
+addresses and towns as you type, **start time** is a calendar/clock picker, and an
+*advanced* block adds shapes, surface source, and ride-area staging — then hit **Plan
+my routes** to get the recommendation plus two alternatives, each with its map inline
+and a GPX download. A plan takes ~20–40 s (same routing + wind services as the CLI).
+A footer **About** link covers privacy and the ride-safety disclaimer.
 
 It runs only on your own machine (`127.0.0.1`, not exposed to your network) and reads
 `ORS_API_KEY` just like the CLI. To stop it, close the terminal window it opened.
+
+> `run.bat` is self-healing: if the environment is missing, or was copied/synced
+> from another computer (a virtualenv can't be moved between machines), it rebuilds
+> it automatically before launching.
 
 > Same engine underneath — the web app and the CLI both call `windroute.planner`, so
 > they always agree.
@@ -101,6 +113,13 @@ On a free host like [Render](https://render.com):
 host/port from the environment, so nothing in the code changes between local and
 hosted. The same `waitress-serve --listen=*:$PORT webapp:app` runs on your own
 server later (see below).
+
+Because the hosted form is reachable by others, the web app ships with sensible
+defaults for a small public instance: security headers (CSP, `X-Frame-Options`,
+HSTS over HTTPS), server-side input limits, a per-IP rate limit on planning (each
+plan makes ~12–15 routing calls, so this protects your free-tier quota), and a
+visible **About / privacy / disclaimer** page (`/about`). None of it needs
+configuration — it's on by default.
 
 > **Never commit your API key** — the repo is public, so a committed key gets
 > scraped and revoked. Keep it in the host's secret env var only.
@@ -230,19 +249,26 @@ old entries.
 
 ```
 windroute/
-  engine.py       core: geocode, wind, route generation + shapes, scoring (no I/O)
-  planner.py      the shared planning pipeline both front-ends call (plan_routes)
-  zones.py        auto-detect the nearest quiet riding zone (for --ride-area)
+  engine.py       core: geocode + autocomplete, wind, route generation + shapes, scoring (no I/O)
+  planner.py      the shared planning pipeline every front-end calls (plan_routes)
+  zones.py        auto-detect a quiet riding zone, by direction or nearest (for --ride-area)
   surface.py      OpenStreetMap/Overpass surface + bike-lane source
   corrections.py  the personal "I rode this" correction cache + road-notes parser
+  rwgps.py        Ride with GPS API client (for the `learn` command's trip history)
+  learn.py        analyse imported trips -> rider profile + suggested weight changes
   render.py       map image + GPX output
   cli.py          the CLI wrapper (typer + rich)
-webapp.py         the local web front-end (Flask) + templates/
-run.bat           double-click launcher for the web app
+webapp.py         the local/hosted web front-end (Flask)
+discord_bot.py    optional Discord front-end (thin over planner; not wired in)
+templates/        web app HTML (base, index, results, about)
+static/           web app JS (app.js) + generated maps/GPX (out/, swept hourly)
+run.bat           double-click launcher for the web app (self-builds the venv)
+Procfile          production start command for a host (waitress-serve webapp:app)
 ```
 
-Every front-end is a thin layer over `engine` + `render` — to add one (web UI,
-Discord bot), import them and call them; never reimplement the logic.
+Every front-end is a thin layer over `planner` (orchestration) + `engine`/`render`
+(logic + output) — to add one, import them and call them; never reimplement the
+pipeline.
 
 ---
 
@@ -260,8 +286,10 @@ keep these attributions** — a couple are required by license:
   (`api.weather.gov`); public-domain, used when Open-Meteo is unavailable.
 - **Maps, geocoding & surface data** — © [OpenStreetMap](https://www.openstreetmap.org/copyright)
   contributors, licensed under the [ODbL](https://opendatacommons.org/licenses/odbl/).
-  Accessed via [Nominatim](https://nominatim.org/) (address geocoding) and the
-  [Overpass API](https://overpass-api.de/) (surface / bike-lane / farmland tags).
+  Accessed via [Nominatim](https://nominatim.org/) (address geocoding), the
+  [Overpass API](https://overpass-api.de/) (surface / bike-lane / farmland tags), and
+  [Photon](https://photon.komoot.io/) by [komoot](https://www.komoot.com/) (the
+  type-ahead location autocomplete in the web form).
 - **Basemap tiles** in the route images — © OpenStreetMap contributors, served from the
   OpenStreetMap [tile servers](https://operations.osmfoundation.org/policies/tiles/)
   (light personal use only; don't point a busy public deployment at them).
@@ -271,9 +299,10 @@ keep these attributions** — a couple are required by license:
 Built with Python and [Flask](https://flask.palletsprojects.com/),
 [staticmap](https://github.com/komoot/staticmap), [Pillow](https://python-pillow.org/),
 [requests](https://requests.readthedocs.io/), [Typer](https://typer.tiangolo.com/),
-[Rich](https://github.com/Textualize/rich), and [waitress](https://github.com/Pylons/waitress).
+[Rich](https://github.com/Textualize/rich), [python-dateutil](https://github.com/dateutil/dateutil),
+and [waitress](https://github.com/Pylons/waitress).
 
 > **Note:** OpenStreetMap and CC BY 4.0 both expect the attribution to be *visible to
-> people viewing the maps*, not only in this README. If you keep the app hosted for
-> others, add a small "© OpenStreetMap contributors · Weather by Open-Meteo.com" line
-> on the page and/or the route images.
+> people viewing the maps*, not only in this README. The web app already does this —
+> every page footer shows "© OpenStreetMap contributors · Weather by Open-Meteo.com"
+> with links. Keep that footer (and the `/about` page) if you fork or host it.
