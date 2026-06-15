@@ -29,6 +29,16 @@ import into Ride with GPS.
   paths as **connectors to reach good riding, never as the ride itself** (would never
   out-and-back a trail); loves on-road bike lanes; rides *out toward quiet rural roads
   and open farmland* for quiet riding. (All confirmed by trip-history analysis — see findings.)
+  - **Will spend real effort to reach good roads — road quality > proximity/wind line.** The
+    home area (Mokena, IL) is suburban but rural country surrounds it; the owner happily rides a
+    **crosswind transit** to get off suburban roads onto quiet farm roads. So reaching good country
+    can outweigh a pure wind line. The default generated routes **don't escape suburbia enough yet**
+    (they optimize wind from the start); `--ride-area auto` does it on request. See work-plan
+    "Captured ideas" + next steps below.
+  - **Sequences wind by EXPOSURE, not just bearing:** routes headwind legs through sheltered
+    paths/urban and saves open rural/farmland for the tailwind leg. `wind_score` doesn't model this
+    yet (it's bearing-only). Validated by recovery.gpx (Mokena, WSW wind, 2026-06-15). See "Captured
+    ideas".
 
 ## How to run (PowerShell)
 
@@ -430,6 +440,14 @@ his improved route-making). Every tuning decision below is backed by this:
 
 ## Possible next steps (discussed, NOT built)
 
+- **Wind-exposure weighting (shelter vs. open)** — rider-validated (recovery.gpx, 2026-06-15):
+  scale the headwind penalty DOWN on sheltered land cover (urban/forest/path) and the tailwind
+  reward UP on open land cover (farmland), since `wind_score` is bearing-only today. Uses the
+  land-cover signals already pulled by `regions`/Overpass. See work-plan "Captured ideas".
+- **Transit-to-good-roads (suburban escape) by default** — the owner will ride a crosswind to
+  reach quiet farm roads; default routes don't escape suburbia enough (only `--ride-area auto`
+  does). Bias default generation toward the nearest good-riding zone when the start archetype is
+  `suburban-sprawl`. See work-plan "Captured ideas".
 - **Preferred-direction / force-a-path vs wind** (data-backed — the owner has one dominant
   heading): **directional ride-area *staging* is now built** (`--ride-area <direction>`), but
   it only biases staging. Still open: (a) a direction/path bias for **normal (non-staging)

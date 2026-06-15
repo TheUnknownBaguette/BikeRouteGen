@@ -292,6 +292,31 @@ results may be off."*
 
 ---
 
+## Captured ideas (rider-validated, not yet scheduled — WANTED, unlike Deferred below)
+
+Surfaced from real rides the owner makes by hand; the generator under-does both today. Build when
+there's room; both fit the generate-and-score frame.
+
+- **Wind-exposure weighting (shelter vs. open).** `wind_score` weights every segment purely by
+  *bearing* — blind to whether a headwind stretch is sheltered or a tailwind stretch is exposed.
+  The owner deliberately routes **headwind legs through paths/urban (trees + buildings break the
+  wind)** and saves **open rural/farmland for the tailwind leg (full push)**. Idea: scale the
+  headwind *penalty* DOWN on sheltered land cover (urban/forest/path) and the tailwind *reward* UP
+  on open land cover (farmland/exposed), using the land-cover signals we already pull (regions +
+  Overpass landuse). Validated by a real Mokena WSW-wind loop (recovery.gpx, 2026-06-15):
+  ~18.7 km headwind-out (sheltered), then a ~10.7 km open E tailwind run on Steger/Delaney;
+  tool `wind_score` +1.47. This is the signal that ride was hand-optimizing.
+- **Transit-to-good-roads (suburban escape) in DEFAULT routes.** The owner will spend real effort —
+  **including riding a crosswind** — to get off suburban roads and onto good quiet farm roads.
+  Mokena itself is suburban but rural country surrounds it. The `--ride-area` staging path does this
+  on request, but the **default generated routes don't escape suburbia enough** — they optimize wind
+  from the start even when the start is suburban. Idea: when the start archetype is `suburban-sprawl`
+  (Task 1), bias default generation to reach the nearest good-riding zone (Task 2 zones already find
+  it) — treat a crosswind transit to quiet roads as worth it, i.e. road-quality reachability can
+  outweigh a pure wind line. Effectively: make a lightweight "escape to good roads" the default in
+  suburban archetypes, not just under `--ride-area auto`. See PROJECT_CONTEXT "Owner's riding
+  preferences" + "Possible next steps".
+
 ## Deferred / do-NOT-build (recorded so the session doesn't wander)
 
 Each is plausible at the margin but **speculative for this rider/use until real riding surfaces a
