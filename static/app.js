@@ -78,7 +78,7 @@
     setPicked(null);                  // typing invalidates any previously picked point
     clearTimeout(timer);
     // Skip short queries and anything that looks like a lat,lng pair (two numbers
-    // split by a comma). House-number addresses ("19150 88th Ave") are NOT skipped.
+    // split by a comma). House-number addresses ("123 Main St") are NOT skipped.
     if (q.length < 2 || /^[-+]?\d{1,3}(\.\d+)?\s*,\s*[-+]?\d{1,3}(\.\d+)?/.test(q)) {
       close(); return;
     }

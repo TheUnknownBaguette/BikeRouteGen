@@ -150,7 +150,7 @@ cd path\to\BikeRouteGen
 .\.venv\Scripts\Activate.ps1
 
 # 2. Plan a ride
-python -m windroute.cli plan -l "Mokena, IL" -d 30 -s "2026-06-14 08:00" -r road
+python -m windroute.cli plan -l "Chicago, IL" -d 30 -s "2026-06-14 08:00" -r road
 ```
 
 You'll get a ranked table in the terminal, then three route options: the
@@ -163,20 +163,20 @@ GPS to refine.
 ```powershell
 # Start from an exact address or coordinates (most precise — use this for a
 # specific bike-path access point a town centroid would miss)
-python -m windroute.cli plan -l "41.52675,-87.87167" -d 25 -s now -r road
+python -m windroute.cli plan -l "41.8789,-87.6359" -d 25 -s now -r road
 
 # Gravel ride, distance in miles, cross-check surface against OpenStreetMap
 python -m windroute.cli plan -l "Champaign, IL" -d 40 --unit mi -r gravel --surface-source both
 
 # Auto-detect the good quiet riding zone and stage the ride to it
-python -m windroute.cli plan -l "Mokena, IL" -d 40 --unit mi --ride-area auto
+python -m windroute.cli plan -l "Chicago, IL" -d 40 --unit mi --ride-area auto
 ```
 
 ### `plan` options
 
 | Option | Meaning |
 | --- | --- |
-| `-l, --location` | Town (`"Mokena, IL"`), street address, or `lat,lng` / DMS coords. |
+| `-l, --location` | Town (`"Chicago, IL"`), street address, or `lat,lng` / DMS coords. |
 | `-d, --distance` | Target ride distance (total, including any transit). |
 | `--unit` | `mi` (default) or `km`. |
 | `-t, --tolerance` | Free +/- distance buffer; only distance beyond it is penalized (default 3). |
@@ -220,8 +220,8 @@ Edit the file — one road per line, `<tags>: <A> -> <B>` — then run it again:
 ```text
 # road-notes.txt
 gravel: Manhattan, IL -> Symerton, IL
-busy:   41.605,-87.861 -> 41.585,-87.861
-gravel, quiet: 19150 88th Ave, Mokena, IL -> Frankfort, IL
+busy:   41.8500,-87.6500 -> 41.8400,-87.6500
+gravel, quiet: 100 N Main St, Joliet, IL -> Plainfield, IL
 ```
 
 Tags are `gravel`, `paved`, `busy`, `quiet` (combine with commas). Each line's two

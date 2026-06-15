@@ -50,8 +50,8 @@ ROAD_NOTES_TEMPLATE = """\
 #
 # examples (delete and replace with your own):
 # gravel: Manhattan, IL -> Symerton, IL
-# busy: 41.605,-87.861 -> 41.585,-87.861
-# gravel, quiet: 19150 88th Ave, Mokena, IL -> Frankfort, IL
+# busy: 41.8500,-87.6500 -> 41.8400,-87.6500
+# gravel, quiet: 100 N Main St, Joliet, IL -> Plainfield, IL
 """
 
 

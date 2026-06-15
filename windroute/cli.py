@@ -47,9 +47,9 @@ def _root():
 def plan(
     location: str = typer.Option(
         ..., "--location", "-l",
-        help="Start point: a town ('Mokena, IL'), a full street address "
-             "('19150 88th Ave, Mokena, IL'), or exact 'lat,lng' coordinates "
-             "('41.5358,-87.889'). Use an address/coords to start right where you "
+        help="Start point: a town ('Chicago, IL'), a full street address "
+             "('233 S Wacker Dr, Chicago, IL'), or exact 'lat,lng' coordinates "
+             "('41.8789,-87.6359'). Use an address/coords to start right where you "
              "reach the bike path."),
     distance: float = typer.Option(..., "--distance", "-d", help="Ride distance."),
     tolerance: float = typer.Option(3.0, "--tolerance", "-t",

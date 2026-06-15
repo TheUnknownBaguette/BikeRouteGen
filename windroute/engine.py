@@ -138,7 +138,7 @@ def geocode(place: str):
     exact spot (e.g. the corner near your house that reaches the bike path),
     not just a town centroid:
       1. Raw coordinates ``"41.5358,-87.8890"`` -> used directly (most precise).
-      2. A street address ``"19150 88th Ave, Mokena, IL"`` -> OSM Nominatim, which
+      2. A street address ``"233 S Wacker Dr, Chicago, IL"`` -> OSM Nominatim, which
          resolves house numbers / streets (Open-Meteo only knows town centroids).
       3. A town / "City, ST" name -> Open-Meteo (fast), falling back to Nominatim.
     """

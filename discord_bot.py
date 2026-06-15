@@ -8,7 +8,7 @@ into the CLI — it's a starting point if you ever want a Discord front-end.
     set DISCORD_TOKEN=...        (and have ORS_API_KEY set, like the CLI)
     python discord_bot.py
 
-Then in a server:  !route Mokena, IL | 30 | road | 2026-06-15 08:00
+Then in a server:  !route Chicago, IL | 30 | road | 2026-06-15 08:00
 """
 import os
 import tempfile

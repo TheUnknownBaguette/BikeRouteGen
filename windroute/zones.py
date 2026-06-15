@@ -2,8 +2,8 @@
 
 The roads cyclists like have a recognizable OSM signature: a rural grid of
 low-traffic roads (unclassified / tertiary / track), open farmland, and few
-arterials. When you start in a suburb (Mokena) the good country is off in one
-direction (south, in the cornfields); on vacation you may not know where it is.
+arterials. When you start in a suburb the good country is often off in one
+direction (open farmland a few miles out); on vacation you may not know where it is.
 
 `find_ride_zone` fans out from the start in directional sectors, pulls the
 relevant road classes + farmland from OSM/Overpass in ONE query, scores each

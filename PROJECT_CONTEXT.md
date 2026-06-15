@@ -16,7 +16,7 @@ ride **into the wind while fresh and get the tailwind home**, and writes a
 labelled maps + GPX files (`route.png/.gpx`, `route-alt1.*`, `route-alt2.*`) you
 import into Ride with GPS.
 
-- **Location:** `C:\Users\gcook\OneDrive\Gus' School Folder\Code\claude\BikeRouteGen`
+- **Location:** the project folder (`path\to\BikeRouteGen`)
 - **APIs:** OpenRouteService (routing, needs free key), Open-Meteo (geocode + wind
   forecast + **archive** for historical wind, no key), OSM Nominatim (address geocode),
   Overpass (OSM surface / bike-lane / busy-path / farmland reads), **Ride with GPS v1**
@@ -25,15 +25,15 @@ import into Ride with GPS.
 - **Owner's riding preferences (these drive the scoring):** quiet county/township
   roads; avoid busy US-highways; dislikes pure out-and-backs (retracing); uses multiuse
   paths as **connectors to reach good riding, never as the ride itself** (would never
-  out-and-back a trail); loves on-road bike lanes; rides *south from Mokena into the
-  cornfields* for quiet riding. (All confirmed by trip-history analysis — see findings.)
+  out-and-back a trail); loves on-road bike lanes; rides *out toward quiet rural roads
+  and open farmland* for quiet riding. (All confirmed by trip-history analysis — see findings.)
 
 ## How to run (PowerShell)
 
 ```powershell
-cd "C:\Users\gcook\OneDrive\Gus' School Folder\Code\claude\BikeRouteGen"
+cd path\to\BikeRouteGen
 .\.venv\Scripts\Activate.ps1
-python -m windroute.cli plan -l "Mokena, IL" -d 30 -s "2026-06-14 08:00" -r road
+python -m windroute.cli plan -l "Chicago, IL" -d 30 -s "2026-06-14 08:00" -r road
 ```
 
 `ORS_API_KEY` is set at User level, so new terminals inherit it. If a terminal was
@@ -190,7 +190,7 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   with SUBURBIA (more km) — rewarding it heavily picks the wrong direction. `W_ART=0.4`.
   Two None-gates: relative standout test (`min_advantage`) + "already in good country"
   (home inner-ring farmland density ≥ 70% of best sector → no staging). Verified:
-  Mokena → SW ~12.4km; rural Manhattan IL → None.
+  a suburban start → a quiet zone ~12km out; an already-rural start → None.
 - **Geometric loop sizing:** `_polygon_loop_waypoints` builds a regular n-gon whose
   circumscribing circle is offset one radius along `bearing` so the START sits on the
   circle and the loop bulges toward `bearing` (aim into wind). Radius solved so crow
@@ -248,8 +248,9 @@ his improved route-making). Every tuning decision below is backed by this:
 - **Seeks bike lanes** (mean 24%, p90 53%) → `W_BIKELANE` 0.4→0.6 (could go higher).
 - **Wind premise holds:** 64% of rides go into the wind first (mean score +0.52, ~61° off the
   headwind line) → `w_wind=1.0` supported.
-- **Direction:** strong southern lean, **SSE the single top sector** (then ENE, SE) — confirms
-  "south into the cornfields" and motivates the preferred-direction bias (next steps).
+- **Direction:** a strong, consistent directional lean (one dominant sector, then two
+  adjacent ones) — confirms the "ride out toward the open farmland" preference and
+  motivates the preferred-direction bias (next steps).
 
 ## Possible next steps (discussed, NOT built)
 
