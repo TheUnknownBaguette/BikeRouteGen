@@ -18,7 +18,9 @@ import into Ride with GPS.
 
 - **Location:** the project folder (`path\to\BikeRouteGen`)
 - **APIs:** OpenRouteService (routing, needs free key), Open-Meteo (geocode + wind
-  forecast + **archive** for historical wind, no key), OSM Nominatim (address geocode),
+  forecast + **archive** for historical wind, no key) with **US NWS** (`api.weather.gov`)
+  as a wind fallback, OSM Nominatim (address geocode), **Photon** (komoot; web-form
+  location autocomplete — built for type-ahead, which Nominatim's policy forbids),
   Overpass (OSM surface / bike-lane / busy-path / farmland reads), **Ride with GPS v1**
   (recorded-trip import, needs an api_key + auth_token). `ORS_API_KEY` is saved at the
   Windows **User** level; RWGPS creds live in `~/.windroute/rwgps.json`.
@@ -57,6 +59,12 @@ a Flask server on `127.0.0.1:5000` and opens a browser; a form runs `plan_routes
 shows the recommendation + 2 alternatives with inline maps + GPX downloads. Maps/GPX
 are written to `static/out/` (gitignored, swept after 1 h). `webapp.py` reads `HOST`/
 `PORT` from the env (default local), so the same file serves locally and on a server.
+Form niceties: the **start point autocompletes** addresses + towns as you type
+(`/suggest` → `engine.suggest_places`, Photon), **start time** is a `datetime-local`
+picker (prefilled client-side to the local hour; empty → "now"), each advanced option has
+an **ⓘ hover tooltip**, and the prefilled location is **Chicago, IL** (not the owner's
+town). `run.bat` is **self-healing**: it builds the venv on first run and rebuilds it if
+one was synced from another machine (a venv isn't relocatable — see gotchas).
 
 **Hosting / future self-host (so friends need no key):** `Procfile` runs `waitress`
 (cross-platform prod server, in requirements) via `waitress-serve --listen=*:$PORT
@@ -68,21 +76,33 @@ FUTURE self-host (owner wants their own mini server eventually, doesn't have one
 driven HOST/PORT + waitress are the provisions for it. Watch the ORS free-tier limit
 (~2000 calls/day, ~12-15 per plan) — a paid key or self-hosted ORS if it grows.
 
+**Public-instance hardening (all default-on, no config):** security headers (CSP
+`default-src 'self'`, X-Frame-Options, Referrer-Policy, HSTS over HTTPS), server-side
+input clamps (candidates 1-20, distance/tolerance bounds), a per-IP in-memory rate limit
+on `/plan` (12 / 5 min — each plan is ~12-15 ORS calls), a 32 KB body cap, friendly error
+messages (raw exceptions logged not shown), and a visible **`/about`** page (privacy
+policy + ride-safety / "vibecoded, no warranty" disclaimer) linked from a heads-up banner
+and footer.
+
 ## Architecture / file map
 
 ```
 windroute/
-  engine.py       core: geocode, wind (+ get_wind_historical), geometric route gen + shapes, scoring, route-option selection (NO I/O — pure fns)
-  planner.py      SHARED pipeline: plan_routes() -> PlanResult (geocode->wind->staging->generate->surface->corrections->evaluate->options). No printing/files. CLI + web both call it.
-  zones.py        auto-detect nearest quiet riding zone (for --ride-area staging)
+  engine.py       core: geocode + suggest_places (Photon autocomplete) + parse_compass, wind (+ get_wind_historical), geometric route gen + shapes, scoring, route-option selection (NO I/O — pure fns)
+  planner.py      SHARED pipeline: plan_routes() -> PlanResult (geocode->wind->staging->generate->surface->corrections->evaluate->options); optional location_label override. No printing/files. CLI + web both call it.
+  zones.py        find_ride_zone: best quiet riding zone, nearest OR a forced compass direction (prefer_bearing) — for --ride-area staging
   surface.py      OSM/Overpass surface + bike-lane + busy/path waytype source (OverpassSurface)
   corrections.py  personal correction cache (~/.windroute/corrections.json) + road-notes parser
   rwgps.py        Ride with GPS v1 API client (auth, list/fetch trips, trip cache, creds)
   learn.py        analyse imported trips -> rider profile + suggested weight changes (pure)
   render.py       map image + GPX output
   cli.py          CLI front-end: plan / mark / roads-import / corrections / forget / rwgps-login / import / learn
-webapp.py         local web front-end (Flask); templates/ has the HTML; run.bat launches it
+webapp.py         local/hosted web front-end (Flask): routes / /plan /suggest /about; headers + rate limit
 discord_bot.py    optional Discord front-end (thin over planner.plan_routes; needs discord.py; not wired in)
+templates/        web HTML: base / index (form) / results / about (privacy + disclaimer)
+static/           app.js (datetime + autocomplete JS); out/ generated maps+GPX (gitignored, swept hourly)
+run.bat           double-click launcher; self-builds/repairs the venv (see gotchas)
+Procfile          prod start command for a host (waitress-serve webapp:app)
 README.md         user-facing setup + usage
 requirements.txt  deps
 ```
@@ -164,13 +184,31 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   from Google Maps (`41°31'36.3"N 87°52'18.0"W`), (3) street address (Nominatim),
   (4) town / "City, ST" (Open-Meteo).
 - **Profile choice:** road rides use `cycling-regular` (NOT `cycling-road`, which
-  hard-avoids paths/lanes and kept routes off the paved Hickory Creek trail). Balance
+  hard-avoids paths/lanes and kept routes off a paved local rail-trail). Balance
   lives in scoring, not the profile.
-- **Auto-detect quiet ride zone + staging** (`--ride-area auto`, or a place/`lat,lng`):
-  `zones.find_ride_zone` does ONE Overpass call, buckets quiet grid roads + arterials +
-  farmland into 12 directional sectors, scores them (farmland dominant), and returns the
-  best sector's centroid — or None. The `staging` shape transits there, loops on the
-  wind, and rides home; only the destination loop is wind-scored. `-d` = TOTAL miles.
+- **Auto-detect quiet ride zone + staging** (`--ride-area auto`, a compass direction, or a
+  place/`lat,lng`): `zones.find_ride_zone` does ONE Overpass call, buckets quiet grid roads
+  + arterials + farmland into 12 directional sectors, scores them (farmland dominant), and
+  returns the best sector's centroid — or None. The `staging` shape transits there, loops
+  on the wind, and rides home; only the destination loop is wind-scored. `-d` = TOTAL miles.
+- **Directional ride-area staging** (`--ride-area south` / `SSE` / `NW` …): stages to the
+  best quiet zone *in that direction* instead of geocoding the word as a place.
+  `engine.parse_compass` turns a direction word/abbrev into a bearing (returns None for
+  non-directions, so real place names still geocode); `find_ride_zone(prefer_bearing=…)`
+  picks the best-scoring sector within ±45° and **skips** the standout / already-in-good-
+  country gates (the user explicitly chose the way). `auto` and place/`lat,lng` unchanged.
+- **Web form UX:** start-point **autocomplete** (addresses + towns via Photon through the
+  `/suggest` same-origin proxy; picking a suggestion routes from its **exact coords** and
+  shows the address as the label via `plan_routes(location_label=…)`), a **datetime-local**
+  start-time picker, and an **ⓘ tooltip** on each advanced option (ride type / surface /
+  ride-area / tolerance / candidates). Default location Chicago (privacy).
+- **Public-instance hardening + privacy page:** security headers, server-side input clamps,
+  per-IP `/plan` rate limit, body-size cap, friendly error messages, and a `/about` page
+  (privacy policy + ride-at-your-own-risk / "vibecoded, no warranty" disclaimer). All
+  default-on. See "Key decisions" for the CSP posture and the autocomplete-proxy reason.
+- **Self-healing `run.bat`:** builds the venv on first run and detects + rebuilds one that
+  was synced from another machine (a venv bakes in the creating Python's absolute path, so
+  OneDrive-synced copies can't run). Web-only users need only Python + an ORS key.
 
 ---
 
@@ -219,6 +257,29 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   passed; strips it otherwise.
 - **Nominatim can't reliably geocode named TRAILS or "&" intersections** — tell the user
   to use a street address or drop a pin for `lat,lng` at a trailhead.
+- **Web autocomplete uses Photon, NOT Nominatim:** Nominatim's policy forbids per-keystroke
+  autocomplete; Photon (komoot) is built for it (Open-Meteo is a town-only fallback).
+  `/suggest` is a **same-origin proxy** because the page CSP is `default-src 'self'` — a
+  browser fetch straight to a geocoder would be blocked, and the proxy also lets us send a
+  proper User-Agent. `suggest_places` over-fetches and re-ranks **prefix-then-population**
+  so a populous prefix match outranks a tiny exact-name village the user didn't mean.
+- **CSP posture:** `script-src 'self'` (the one inline `<script>` was moved to
+  `static/app.js`), but `style-src` keeps `'unsafe-inline'` because the templates use inline
+  `style="…"` attributes throughout — tightening it would mean stripping all of those.
+- **Picked-suggestion precision:** selecting an autocomplete item posts hidden
+  `picked_lat/lng/label`; if the visible text still equals the label, webapp routes from the
+  exact coords and passes `location_label` so results show the address (not raw coords).
+  Editing the text after picking clears the coords. The JS coordinate-skip matches a lat,lng
+  *pair* so house-number addresses ("123 Main St") still autocomplete. `datetime-local`
+  posts `YYYY-MM-DDTHH:MM` (parsed by `dateutil`); empty/absent → webapp uses `"now"`.
+- **A virtualenv is NOT relocatable:** `pyvenv.cfg` + `Scripts/` hardcode the creating
+  Python's absolute path. `.venv/` is gitignored, but the project lives in OneDrive, which
+  synced machine-A's venv onto machine B where it couldn't run. `run.bat` self-heals (runs
+  `python --version`, rebuilds on failure). Never commit or sync a venv.
+- **Privacy:** all in-repo examples use Chicago / a landmark address / generic IL towns — the
+  owner's home town + street address were scrubbed from README, CLI help, docstrings,
+  comments, and this file. **Current files only**; git history still contains them and the
+  owner is OK with that ("just don't want it obvious").
 - **RWGPS API quirks** (`rwgps.py`): auth is api_key + auth_token **headers**
   (`x-rwgps-api-key` / `x-rwgps-auth-token`), no password — the token is minted from the
   API client's edit page. Trips are `/trips.json` (the `users/{id}/trips.json` form 404s).
@@ -254,11 +315,13 @@ his improved route-making). Every tuning decision below is backed by this:
 
 ## Possible next steps (discussed, NOT built)
 
-- **Preferred-direction / force-a-path vs wind** (now strongly data-backed — SSE is the
-  owner's dominant heading): owner "gets on the Hickory Creek Trail going south" but the
-  optimizer aims into the wind first. Ideas: (a) a "prefer/force this direction or path"
-  bias; (b) a "best-day finder" scanning the 7-day forecast for the day that best rewards a
-  chosen-direction ride. The `learn` direction histogram could seed a default bias.
+- **Preferred-direction / force-a-path vs wind** (data-backed — the owner has one dominant
+  heading): **directional ride-area *staging* is now built** (`--ride-area <direction>`), but
+  it only biases staging. Still open: (a) a direction/path bias for **normal (non-staging)
+  rides**, where the optimizer still aims into the wind first (owner often wants to ride a
+  particular local trail/road out regardless); (b) a "best-day finder" scanning the 7-day
+  forecast for the day that best rewards a chosen-direction ride. The `learn` direction
+  histogram could seed a default bias.
 - **Auto-tune weights from `learn`:** the analysis already emits suggested weight changes;
   a future pass could fit the weights to the trip history instead of hand-tuning. (Deliberately
   deferred — owner chose "analysis + review" over auto-retune.)
