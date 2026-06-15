@@ -22,6 +22,7 @@ from . import engine, surface, zones, regions
 from .corrections import CorrectionCache
 
 SURFACE_DISAGREE = 0.10   # |ORS unpaved - OSM unpaved| above this -> flag a route
+LOW_COVERAGE_FRAC = 0.25  # below this share of the route OSM-surface-tagged -> low confidence
 
 
 @dataclass
@@ -36,6 +37,7 @@ class PlanResult:
     notes: list = field(default_factory=list)   # surface/corrections/ride-area status lines
     surface_mode: str = "ors"    # "ors" | "osm" | "both"
     region: "regions.RegionProfile | None" = None   # terrain archetype (when classify=True)
+    data_confidence: str = "ok"  # "ok" | "low" | "ors-baseline" (Task 5 degradation)
 
 
 def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
@@ -101,10 +103,30 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
         loop_geom=loop_geom)
 
     mode = surface_source.lower()
+    coverage = None
     if mode == "osm":
-        notes.append(_apply_osm_surface(cands))
+        note, coverage = _apply_osm_surface(cands)
+        notes.append(note)
     elif mode == "both":
-        notes.append(_compare_surface(cands))
+        note, coverage = _compare_surface(cands)
+        notes.append(note)
+
+    # Optional regional surface providers (Task 5): OSM above is the universal
+    # baseline; these augment it only where their admin boundary applies, so adding
+    # one changes nothing outside its region. None are shipped by default.
+    for prov in surface.regional_providers_for(lat, lng):
+        try:
+            pnote = prov.refine(cands)
+        except Exception as exc:                 # a flaky regional source must not sink a plan
+            pnote = f"{prov.name} unavailable ({exc}); kept baseline"
+        if pnote:
+            notes.append(f"surface[{prov.name}]: {pnote}")
+
+    # Graceful degradation: when surface data is thin, say so rather than returning
+    # a confidently-wrong gravel estimate.
+    data_confidence, conf_note = _surface_confidence(mode, coverage)
+    if conf_note:
+        notes.append(conf_note)
 
     if corrections:
         note = _apply_corrections(cands, corrections_file)
@@ -130,7 +152,7 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
                                           n_alternatives=n_alternatives)
     return PlanResult(location_label=label, when=when, wind=wind, zone=zone,
                       ranked=ranked, options=options, notes=notes, surface_mode=mode,
-                      region=region)
+                      region=region, data_confidence=data_confidence)
 
 
 # --------------------------------------------------------------------------- #
@@ -183,15 +205,18 @@ def _apply_osm_surface(cands):
     """Override each candidate's paved/unpaved fractions with OSM/Overpass data.
 
     One Overpass query covers all candidates. On any failure we leave the ORS
-    baseline untouched and say so, rather than aborting the whole plan.
+    baseline untouched and say so, rather than aborting the whole plan. Returns
+    (note, coverage) where coverage is the mean share of route length that had an
+    OSM surface tag nearby (None if unavailable) — the data-confidence signal.
     """
     try:
         src = surface.OverpassSurface().build([c.coords for c in cands])
     except Exception as exc:                              # network / Overpass down
-        return f"surface: OSM lookup failed ({exc}); kept ORS surface"
+        return f"surface: OSM lookup failed ({exc}); kept ORS surface", None
     if not src.way_count and not src.bikelane_count:
-        return "surface: no OSM surface tags in this area; kept ORS surface"
+        return "surface: no OSM surface tags in this area; kept ORS surface", 0.0
     refined = lanes = bad = 0
+    cov_sum = cov_n = 0.0
     for c in cands:
         res = src.classify(c.coords)
         if res:
@@ -207,13 +232,17 @@ def _apply_osm_surface(cands):
             c.good_gravel_frac, c.unrideable_frac = qual
             if c.unrideable_frac > 0:
                 bad += 1
+        cov = src.coverage(c.coords)
+        if cov is not None:
+            cov_sum += cov
+            cov_n += 1
     note = (f"surface: OSM/Overpass ({src.way_count} tagged ways, "
             f"{refined}/{len(cands)} loops refined; "
             f"{src.bikelane_count} bike-lane ways, {lanes} routes use one)")
     if src.quality_count:
         note += (f"; quality graded ({src.quality_count} ways, "
                  f"{bad} routes touch unrideable surface)")
-    return note
+    return note, (cov_sum / cov_n if cov_n else None)
 
 
 def _compare_surface(cands):
@@ -229,11 +258,12 @@ def _compare_surface(cands):
     try:
         src = surface.OverpassSurface().build([c.coords for c in cands])
     except Exception as exc:                             # network / Overpass down
-        return f"surface cross-check: OSM lookup failed ({exc}); kept ORS only"
+        return f"surface cross-check: OSM lookup failed ({exc}); kept ORS only", None
     if not src.way_count and not src.bikelane_count:
-        return "surface cross-check: no OSM surface tags in this area; kept ORS only"
+        return "surface cross-check: no OSM surface tags in this area; kept ORS only", 0.0
 
     disagree = 0
+    cov_sum = cov_n = 0.0
     for c in cands:
         lane = src.classify_bikelane(c.coords)
         if lane is not None:
@@ -241,6 +271,10 @@ def _compare_surface(cands):
         qual = src.classify_quality(c.coords)
         if qual is not None:
             c.good_gravel_frac, c.unrideable_frac = qual
+        cov = src.coverage(c.coords)
+        if cov is not None:
+            cov_sum += cov
+            cov_n += 1
         res = src.classify(c.coords)
         if not res:
             continue
@@ -249,9 +283,31 @@ def _compare_surface(cands):
         c.paved_frac, c.unpaved_frac = paved, unpaved    # OSM is primary for scoring
         if abs(unpaved - c.surface_by_source["ors"]) > SURFACE_DISAGREE:
             disagree += 1
-    return (f"surface cross-check: ORS vs OSM over {src.way_count} tagged ways; "
+    note = (f"surface cross-check: ORS vs OSM over {src.way_count} tagged ways; "
             f"{disagree}/{len(cands)} routes disagree >{SURFACE_DISAGREE*100:.0f}% "
             f"(scoring uses OSM)")
+    return note, (cov_sum / cov_n if cov_n else None)
+
+
+def _surface_confidence(mode, coverage):
+    """Map the surface mode + OSM coverage to (confidence_label, note_or_None).
+
+    Honest degradation (work-plan Task 5): rather than presenting a confidently-
+    wrong gravel estimate where data is thin, flag it. `ors`-mode plans are labelled
+    'ors-baseline' (coarse ORS buckets, the known default limitation — no nag). In
+    `osm`/`both`, sparse OSM surface tagging (coverage below the threshold, or none
+    at all) is flagged 'low' with a user-facing note.
+    """
+    if mode not in ("osm", "both"):
+        return "ors-baseline", None
+    if coverage is None:                          # OSM lookup failed entirely
+        return "low", ("data confidence LOW: couldn't read OSM surface data here — "
+                       "gravel estimates fall back to coarse ORS buckets.")
+    if coverage < LOW_COVERAGE_FRAC:
+        return "low", (f"data confidence LOW: only ~{coverage * 100:.0f}% of the route "
+                       f"has OSM surface tags — treat the gravel figures as a rough hint "
+                       f"(Street View still wins for surface truth).")
+    return "ok", None
 
 
 def _apply_corrections(cands, corrections_file):

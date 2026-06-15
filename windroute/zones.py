@@ -23,7 +23,7 @@ from dataclasses import dataclass
 import requests
 
 from .engine import _bearing, _haversine_km, _destination
-from .surface import OVERPASS_URL, USER_AGENT
+from .surface import OVERPASS_URL, USER_AGENT, overpass_json
 
 # OSM highway classes. The quiet rural grid is the positive signal; arterials are
 # the thing to ride away from. Residential is deliberately omitted — suburbs are
@@ -288,9 +288,6 @@ def _query(lat, lng, search_km, timeout, url, want_forest=False, want_water=Fals
         query += (f'way["natural"="water"]{around};out center;'
                   f'way["landuse"~"^(reservoir|basin)$"]{around};out center;')
     try:
-        resp = requests.post(url, data={"data": query}, timeout=timeout + 15,
-                             headers={"User-Agent": USER_AGENT})
-        resp.raise_for_status()
-        return resp.json().get("elements", [])
-    except requests.RequestException:
+        return overpass_json(query, timeout, url)
+    except (requests.RequestException, ValueError):
         return None

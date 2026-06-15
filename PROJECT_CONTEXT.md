@@ -92,7 +92,7 @@ windroute/
   planner.py      SHARED pipeline: plan_routes() -> PlanResult (geocode->wind->staging->generate->surface->corrections->evaluate->options); optional location_label override. No printing/files. CLI + web both call it.
   zones.py        find_ride_zone: best quiet riding zone, nearest OR a forced compass direction (prefer_bearing) — for --ride-area staging
   regions.py      classify_region -> RegionProfile (terrain archetype): one Overpass read (roads + land-use) + Open-Meteo elevation (relief), cached per ~0.1° cell. classify_archetype() is pure. Diagnostic only so far (work-plan Task 1) — does NOT yet drive weights
-  surface.py      OSM/Overpass surface + bike-lane + busy/path waytype source (OverpassSurface)
+  surface.py      OSM/Overpass surface + bike-lane + busy/path + gravel-quality source (OverpassSurface); overpass_json mirror-fallback; SurfaceProvider registry (Task 5)
   corrections.py  personal correction cache (~/.windroute/corrections.json) + road-notes parser
   rwgps.py        Ride with GPS v1 API client (auth, list/fetch trips, trip cache, creds)
   learn.py        analyse imported trips -> rider profile + suggested weight changes (pure)
@@ -182,6 +182,26 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   deferred to Task 5** — the work plan defines it as an optional surface-provider, so it lands with
   the provider registry. The class proxy (ORS waytype-1 / OSM busy classes) stays the universal
   baseline.
+- **Surface-provider registry + graceful degradation + Overpass mirror-fallback** (work-plan
+  Task 5 — DONE):
+  - **Registry:** OSM `surface=*` (`OverpassSurface`) is the UNIVERSAL baseline; optional
+    region-specific sources (state DOT layers, county GIS, AADT — Task 4b) plug in as
+    `surface.SurfaceProvider` subclasses gated by `applies_to(lat,lng)` (admin boundary).
+    `surface.REGIONAL_SURFACE_PROVIDERS` (empty by default) + `regional_providers_for(lat,lng)`;
+    `plan_routes` runs the applicable ones after the OSM baseline, so adding/removing one changes
+    only that region's reads. **No concrete regional providers shipped** — the mechanism is the
+    deliverable; this is the home for Task 4b AADT and future state providers.
+  - **Graceful degradation:** `OverpassSurface.coverage()` = share of the route within range of an
+    OSM-surface-tagged way. `PlanResult.data_confidence` ∈ {`ok`, `low`, `ors-baseline`} via
+    `planner._surface_confidence` (LOW_COVERAGE_FRAC=0.25). Thin OSM coverage (or a failed lookup)
+    under `osm`/`both` -> `low` + a user-facing note ("treat gravel figures as a rough hint");
+    `ors` mode -> `ors-baseline` (no nag). CLI renders the low note in bold yellow; web shows it in
+    notes. A foreign/low-coverage start now returns a route PLUS an honest low-confidence flag.
+  - **Overpass mirror-fallback:** `surface.overpass_json(query, timeout, url)` tries
+    `OVERPASS_MIRRORS` in order (overpass-api.de -> maps.mail.ru -> kumi.systems). ALL Overpass
+    reads (surface, regions, zones) go through it, so the frequent overpass-api.de 504s no longer
+    sink a read. Live-verified: a default `classify_region` succeeds via a mirror when the primary
+    is down.
 - **Wind scoring:** `wind_score` rewards headwind on first half / tailwind home.
 - **Distance tolerance:** `-t/--tolerance` free buffer band; only excess is penalized.
 - **Elevation fix:** `engine._smoothed_ascent` (interpolate SRTM nodata, median +
@@ -386,10 +406,9 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
 - **Region classifier Overpass query gotcha:** the union MUST be `(...);out geom;` — a missing
   `;` after the `)` is a silent **400 Bad Request** (cost me a debug cycle). The query is heavy
   (roads + all land-use/natural at 10 km), so `overpass-api.de` frequently **504s** under load;
-  the classifier then returns `unknown` (low confidence) by design. Observed during dev that the
-  `maps.mail.ru` Overpass mirror answered the same 10 km query in ~5 s when the main instance was
-  504ing — a shared mirror-fallback across `surface.py`/`zones.py`/`regions.py` is a good future
-  hardening (not done; all three still default to `OVERPASS_URL` = overpass-api.de).
+  the classifier then returns `unknown` (low confidence) by design. **Mitigated in Task 5:** all
+  Overpass reads now go through `surface.overpass_json`, which falls back across `OVERPASS_MIRRORS`
+  (overpass-api.de -> maps.mail.ru -> kumi.systems), so a 504 on the primary no longer kills a read.
 
 ## What the trip history revealed (Jun 2026, newest 200 trips → 108 outdoor rides)
 

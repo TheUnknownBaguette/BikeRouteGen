@@ -118,7 +118,9 @@ def plan(
         if result.region is not None:
             console.print(_region_panel(result.region))
         for note in result.notes:
-            console.print(f"[dim]{note}[/]")
+            # The low-surface-data-confidence note (Task 5) is rendered prominently.
+            style = "bold yellow" if note.startswith("data confidence") else "dim"
+            console.print(f"[{style}]{note}[/]")
 
         console.print(_candidates_table(ranked, ride_type, compare=(mode == "both"),
                                          show_lane=(mode in ("osm", "both"))))

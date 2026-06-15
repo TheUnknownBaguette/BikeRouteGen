@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 import requests
 
 from .engine import _haversine_km, _destination
-from .surface import OVERPASS_URL, USER_AGENT
+from .surface import OVERPASS_URL, USER_AGENT, overpass_json
 
 ELEVATION_URL = "https://api.open-meteo.com/v1/elevation"   # Open-Meteo, keyless
 
@@ -243,10 +243,7 @@ def _query_overpass(lat, lng, radius_km, timeout, url):
         f"out geom;"
     )
     try:
-        resp = requests.post(url, data={"data": query}, timeout=timeout + 15,
-                             headers={"User-Agent": USER_AGENT})
-        resp.raise_for_status()
-        return resp.json().get("elements", [])
+        return overpass_json(query, timeout, url)
     except (requests.RequestException, ValueError):
         return None
 

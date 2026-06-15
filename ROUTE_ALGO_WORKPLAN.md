@@ -207,6 +207,17 @@ sightlines, lighting.
 
 ## Task 5 — Surface-provider registry + graceful degradation
 
+> **STATUS: DONE (2026-06-15).** Registry: `surface.SurfaceProvider` + `REGIONAL_SURFACE_PROVIDERS`
+> (empty default) + `regional_providers_for(lat,lng)`, dispatched by `applies_to` admin boundary;
+> `plan_routes` runs them after the OSM baseline (Task 4b AADT will register here). Degradation:
+> `OverpassSurface.coverage()`, `PlanResult.data_confidence` (ok/low/ors-baseline) via
+> `_surface_confidence` + user note; CLI bold-yellow, web in notes. Bonus hardening:
+> `surface.overpass_json` mirror-fallback (overpass-api.de -> maps.mail.ru -> kumi.systems) wraps
+> ALL Overpass reads (surface/regions/zones) — live-verified a default classify succeeds when the
+> primary 504s. Tests in `tests/test_providers.py` (dispatch, fallback, coverage, confidence). No
+> concrete regional providers shipped (mechanism is the deliverable). **Core (1–5) complete; 6–8
+> are flagged upside.**
+
 **Goal:** portability across data environments + honesty when data is thin.
 
 **Registry:** make **OSM `surface=*` the universal baseline**; treat US-specific GIS (Indiana DOT

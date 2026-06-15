@@ -19,6 +19,41 @@ import requests
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 USER_AGENT = "windroute/0.1 (personal cycling tool)"
 
+# Overpass mirrors tried in order (work-plan Task 5 hardening). The main instance
+# (overpass-api.de) frequently 504s under load; the others answer the same query
+# when it's down. Every Overpass read in the project (surface, regions, zones) goes
+# through `overpass_json` so one flaky endpoint doesn't sink a plan.
+OVERPASS_MIRRORS = (
+    OVERPASS_URL,
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+)
+
+
+def overpass_json(query, timeout=90, url=None):
+    """POST an Overpass query, trying mirrors in order until one answers.
+
+    Returns the parsed ``elements`` list. If `url` is given it's tried first (then
+    the other mirrors as fallback); otherwise all mirrors are tried in order.
+    Raises the last error only if EVERY endpoint fails, so a single 504 / timeout
+    no longer kills a read.
+    """
+    if url:
+        urls = [url] + [m for m in OVERPASS_MIRRORS if m != url]
+    else:
+        urls = list(OVERPASS_MIRRORS)
+    last_exc = None
+    for u in urls:
+        try:
+            resp = requests.post(u, data={"data": query}, timeout=timeout + 15,
+                                 headers={"User-Agent": USER_AGENT})
+            resp.raise_for_status()
+            return resp.json().get("elements", [])
+        except (requests.RequestException, ValueError) as exc:
+            last_exc = exc
+            continue
+    raise last_exc if last_exc else RuntimeError("no Overpass endpoint available")
+
 # OSM surface values -> paved / unpaved. Unknown or untagged is treated as
 # paved, matching the ORS path's default.
 UNPAVED_SURFACES = {
@@ -218,12 +253,7 @@ class OverpassSurface:
             f'way["highway"~"^({path_re})$"]{bb};);'
             f"out tags geom;"
         )
-        resp = requests.post(
-            self.url, data={"data": query}, timeout=self.timeout + 15,
-            headers={"User-Agent": USER_AGENT},
-        )
-        resp.raise_for_status()
-        elements = resp.json().get("elements", [])
+        elements = overpass_json(query, self.timeout, self.url)
 
         grid: dict = {}
         bike_grid: dict = {}
@@ -404,6 +434,26 @@ class OverpassSurface:
             return None
         return good / total, bad / total
 
+    def coverage(self, coords):
+        """Fraction of the route within match range of a SURFACE-tagged way (0..1).
+
+        The data-confidence signal (work-plan Task 5): low coverage means OSM has
+        sparse surface tagging here, so the paved/unpaved/gravel estimates are
+        low-confidence and the caller should say so. None if no index was built.
+        """
+        if self._grid is None:
+            return None
+        total = covered = 0.0
+        for a, b in zip(coords, coords[1:]):
+            d = _haversine_km(a, b)
+            if d <= 0:
+                continue
+            total += d
+            mid = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+            if self._nearest_class(mid) is not None:
+                covered += d
+        return covered / total if total > 0 else None
+
     def _nearest_quality(self, p):
         ci, cj = self._cell(*p)
         best_d, best_q = self.match_threshold_m, None
@@ -446,3 +496,43 @@ class OverpassSurface:
                     if _pt_seg_dist_m(p, a, b) < self.match_threshold_m:
                         return True
         return False
+
+
+# --------------------------------------------------------------------------- #
+# Surface-provider registry (work-plan Task 5)
+# --------------------------------------------------------------------------- #
+# OSM `surface=*` via `OverpassSurface` is the UNIVERSAL baseline (it runs
+# everywhere). Region-specific data — a state DOT surface layer, a county
+# road-commission GIS, or AADT traffic counts (work-plan Task 4b) — are OPTIONAL
+# providers discovered by admin boundary: a provider's `applies_to(lat, lng)`
+# gates it to its region, so adding/removing one changes only that region's reads.
+# The default registry is EMPTY (only the OSM baseline runs); real regional
+# providers (e.g. Indiana DOT LRSE_Surface_Type) plug in here without touching the
+# pipeline. A provider mutates candidate surface fields where it has data and
+# returns a short status note (or None).
+class SurfaceProvider:
+    """Base class for an optional regional surface-data provider.
+
+    Subclass and implement `applies_to` (the admin-boundary gate) and `refine`
+    (augment/override candidate surface fields where this source has data). Keep
+    refinements ADDITIVE over the OSM baseline so a missing provider just means
+    falling back to OSM — never a worse route.
+    """
+    name = "regional-surface"
+
+    def applies_to(self, lat, lng) -> bool:
+        return False
+
+    def refine(self, cands):
+        """Mutate candidate surface fields in place; return a note str or None."""
+        return None
+
+
+# Register regional providers here (none shipped by default — the mechanism is the
+# deliverable; concrete state/DOT providers are future work, see PROJECT_CONTEXT).
+REGIONAL_SURFACE_PROVIDERS: list = []
+
+
+def regional_providers_for(lat, lng):
+    """The registered regional providers whose admin boundary covers (lat, lng)."""
+    return [p for p in REGIONAL_SURFACE_PROVIDERS if p.applies_to(lat, lng)]
