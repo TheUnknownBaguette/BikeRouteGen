@@ -52,6 +52,16 @@ PATH_WAYTYPES = {4, 6, 7}
 COMPASS_16 = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
               "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
 
+# Full-word compass directions -> bearing in degrees (0=N, 90=E). The 16-point
+# abbreviations (N, SSE, …) are handled via COMPASS_16; this covers the spelled-out
+# forms a person is likely to type ("south", "southeast", "south south west").
+_COMPASS_WORDS = {
+    "north": 0.0, "northnortheast": 22.5, "northeast": 45.0, "eastnortheast": 67.5,
+    "east": 90.0, "eastsoutheast": 112.5, "southeast": 135.0, "southsoutheast": 157.5,
+    "south": 180.0, "southsouthwest": 202.5, "southwest": 225.0, "westsouthwest": 247.5,
+    "west": 270.0, "westnorthwest": 292.5, "northwest": 315.0, "northnorthwest": 337.5,
+}
+
 
 # --------------------------------------------------------------------------- #
 # Data containers
@@ -1175,6 +1185,24 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
 # --------------------------------------------------------------------------- #
 def compass_label(deg: float) -> str:
     return COMPASS_16[int((deg % 360) / 22.5 + 0.5) % 16]
+
+
+def parse_compass(text):
+    """A compass direction ('south', 'S', 'SSE', 'south-east') -> bearing degrees.
+
+    Returns None for anything that isn't a direction, so callers can fall back to
+    treating the input as a place name. Spaces, hyphens, and case are ignored.
+    """
+    if not text:
+        return None
+    squashed = re.sub(r"[\s\-_]+", "", str(text).strip().lower())
+    if not squashed:
+        return None
+    if squashed in _COMPASS_WORDS:
+        return _COMPASS_WORDS[squashed]
+    if squashed.upper() in COMPASS_16:
+        return COMPASS_16.index(squashed.upper()) * 22.5
+    return None
 
 
 def explain(best: Candidate, wind: Wind, ride_type: str) -> str:

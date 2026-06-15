@@ -165,7 +165,7 @@ python -m windroute.cli plan -l "Mokena, IL" -d 40 --unit mi --ride-area auto
 | `-r, --ride-type` | `road` (avoid gravel) or `gravel` (seek it). |
 | `--shapes` | Comma list: `loop,lollipop,rectangle,out-and-back,roundtrip` (default `loop,lollipop,rectangle`). `roundtrip` is the old ORS round-trip algorithm (can tangle; opt-in). |
 | `--surface-source` | `ors` (default), `osm` (finer OSM tags + bike lanes), or `both` (cross-check). |
-| `--ride-area` | `auto` to stage to the nearest quiet zone, or a place / `lat,lng` to force one. Omit for a normal ride from the start. |
+| `--ride-area` | `auto` to stage to the nearest quiet zone, a compass direction (`south`, `SSE`) to stage to the best quiet zone that way, or a place / `lat,lng` to force one. Omit for a normal ride from the start. |
 | `--corrections / --no-corrections` | Apply your personal "I rode this" cache (on by default). |
 | `--candidates` | How many routes to generate and rank (default 12; more = better odds, slower, more API calls). |
 | `-o, --out` | Output file basename (default `route`). |

@@ -47,14 +47,26 @@ def _seg_len_km(pts):
     return sum(_haversine_km(a, b) for a, b in zip(pts, pts[1:]))
 
 
+def _angle_diff(a, b):
+    """Smallest absolute difference between two bearings, in degrees (0..180)."""
+    d = abs((a - b) % 360.0)
+    return min(d, 360.0 - d)
+
+
 def find_ride_zone(lat, lng, search_km=20.0, inner_km=5.0, sectors=12,
-                   timeout=90, url=OVERPASS_URL, min_advantage=1.6):
+                   timeout=90, url=OVERPASS_URL, min_advantage=1.6,
+                   prefer_bearing=None):
     """Find the best 'good riding' staging zone around (lat, lng).
 
     Returns a dict ``{lat, lng, bearing, distance_km, score, label, sectors}`` for
     the winning direction, or None if no sector clearly beats the rest (already in
     good country, or nothing good within range). `min_advantage` is how many times
     the median sector score the winner must reach to count as a standout.
+
+    When `prefer_bearing` (degrees) is given, the caller has explicitly asked to ride
+    that way: pick the best-scoring sector within ~45 deg of that heading and skip the
+    "standout" and "already in good country" gates — honor the chosen direction even
+    if it isn't the globally best one. Returns None only if the lookup itself fails.
     """
     width = 360.0 / sectors
     grid = [0.0] * sectors
@@ -112,28 +124,40 @@ def find_ride_zone(lat, lng, search_km=20.0, inner_km=5.0, sectors=12,
 
     scores = [W_GRID * grid[i] + W_FARM * farm[i] - W_ART * art[i]
               for i in range(sectors)]
-    best = max(range(sectors), key=lambda i: scores[i])
-    best_score = scores[best]
 
-    ordered = sorted(scores)
-    median = ordered[len(ordered) // 2]
-    # Standout test: positive, and clearly above the typical sector. When the
-    # median is non-positive (urban), any positive sector is a standout.
-    bar = max(median * min_advantage, 0.0001) if median > 0 else 0.0001
-    if best_score <= 0 or best_score < bar:
-        return None
+    if prefer_bearing is not None:
+        # Forced direction: choose the best sector within ~45 deg of the heading,
+        # skipping the standout / already-good gates below.
+        near = [i for i in range(sectors)
+                if _angle_diff((i + 0.5) * width, prefer_bearing) <= 45.0]
+        if not near:                          # window narrower than a sector — nearest one
+            near = [min(range(sectors),
+                        key=lambda i: _angle_diff((i + 0.5) * width, prefer_bearing))]
+        best = max(near, key=lambda i: scores[i])
+        best_score = scores[best]
+    else:
+        best = max(range(sectors), key=lambda i: scores[i])
+        best_score = scores[best]
 
-    # "Already in good country" gate: if the home inner ring is itself farm-rich,
-    # there's nothing to stage to — just ride a wind loop from where you are.
-    # Compare farmland DENSITY (polys per km^2) so the small inner disc and the
-    # larger sector band are compared fairly. Home wins if its density is at
-    # least ~70% of the best sector's.
-    inner_area = math.pi * inner_km ** 2
-    sector_area = (math.pi / sectors) * (search_km ** 2 - inner_km ** 2)
-    home_density = farm_in / inner_area if inner_area > 0 else 0.0
-    best_density = farm[best] / sector_area if sector_area > 0 else 0.0
-    if home_density >= 0.7 * best_density:
-        return None
+        ordered = sorted(scores)
+        median = ordered[len(ordered) // 2]
+        # Standout test: positive, and clearly above the typical sector. When the
+        # median is non-positive (urban), any positive sector is a standout.
+        bar = max(median * min_advantage, 0.0001) if median > 0 else 0.0001
+        if best_score <= 0 or best_score < bar:
+            return None
+
+        # "Already in good country" gate: if the home inner ring is itself farm-rich,
+        # there's nothing to stage to — just ride a wind loop from where you are.
+        # Compare farmland DENSITY (polys per km^2) so the small inner disc and the
+        # larger sector band are compared fairly. Home wins if its density is at
+        # least ~70% of the best sector's.
+        inner_area = math.pi * inner_km ** 2
+        sector_area = (math.pi / sectors) * (search_km ** 2 - inner_km ** 2)
+        home_density = farm_in / inner_area if inner_area > 0 else 0.0
+        best_density = farm[best] / sector_area if sector_area > 0 else 0.0
+        if home_density >= 0.7 * best_density:
+            return None
 
     if cw[best] > 0:
         zlat, zlng = cx[best] / cw[best], cy[best] / cw[best]

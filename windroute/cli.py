@@ -77,8 +77,9 @@ def plan(
         help="Stage the ride to quieter country: 'auto' auto-detects the nearest "
              "good quiet riding zone (open farmland, low-traffic grid) and adds a "
              "'staging' option that transits there, loops on the wind, and rides "
-             "home; or pass a place/'lat,lng' to force a specific staging zone. "
-             "Omit for a normal ride from the start point."),
+             "home; a compass direction (e.g. 'south', 'SSE') stages to the best "
+             "quiet zone that way; or pass a place/'lat,lng' to force a specific "
+             "staging zone. Omit for a normal ride from the start point."),
     out: str = typer.Option("route", "--out", "-o", help="Output file basename."),
     candidates: int = typer.Option(12, "--candidates", help="Routes to generate and rank."),
     corrections: bool = typer.Option(

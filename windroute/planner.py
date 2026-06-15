@@ -106,9 +106,15 @@ def _resolve_ride_area(ride_area, lat, lng, target_km):
     """
     max_transit_oneway = 0.3 * target_km
     area = ride_area.strip()
-    if area.lower() == "auto":
-        zone = zones.find_ride_zone(lat, lng)
+    prefer = None if area.lower() == "auto" else engine.parse_compass(area)
+    if area.lower() == "auto" or prefer is not None:
+        # 'auto' = best zone anywhere; a compass direction = best zone that way.
+        zone = zones.find_ride_zone(lat, lng, prefer_bearing=prefer)
         if not zone:
+            if prefer is not None:
+                return None, (f"ride-area: couldn't find quiet riding to the "
+                              f"{engine.compass_label(prefer)} within range — riding "
+                              f"from the start.")
             return None, ("ride-area: you're already in good riding country (or "
                           "nothing stands out within range) — riding from the start.")
         bearing = zone["bearing"]
