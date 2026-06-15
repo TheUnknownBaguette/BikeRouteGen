@@ -34,8 +34,8 @@ wind while fresh and get the tailwind home**.
 Run these once. They assume you're in the project folder.
 
 ```powershell
-# 1. Go to the project
-cd "C:\Users\gcook\OneDrive\Gus' School Folder\Code\claude\BikeRouteGen"
+# 1. Go to the project folder (wherever you cloned it)
+cd path\to\BikeRouteGen
 
 # 2. Create and activate a virtual environment
 python -m venv .venv
@@ -127,7 +127,7 @@ Prefer the terminal? Once setup is done, a normal session is just two steps:
 
 ```powershell
 # 1. Activate the environment
-cd "C:\Users\gcook\OneDrive\Gus' School Folder\Code\claude\BikeRouteGen"
+cd path\to\BikeRouteGen
 .\.venv\Scripts\Activate.ps1
 
 # 2. Plan a ride
