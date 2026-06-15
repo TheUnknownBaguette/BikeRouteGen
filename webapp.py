@@ -20,7 +20,7 @@ import uuid
 from collections import defaultdict
 from pathlib import Path
 
-from flask import Flask, render_template, request, send_from_directory
+from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from windroute import engine, render, planner
 
@@ -127,6 +127,14 @@ def index():
 @app.route("/about")
 def about():
     return render_template("about.html")
+
+
+@app.route("/suggest")
+def suggest():
+    """Type-ahead place suggestions for the location field (JSON). Same-origin
+    proxy to the geocoder so the page's strict CSP can stay default-src 'self'."""
+    items = engine.suggest_places(request.args.get("q", "")[:80], count=6)
+    return jsonify(items)
 
 
 def _reshow(f, shapes, error, status):

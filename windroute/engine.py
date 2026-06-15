@@ -237,6 +237,47 @@ def _geocode_openmeteo(place: str):
     return top["latitude"], top["longitude"], label
 
 
+def suggest_places(query: str, count: int = 6):
+    """Type-ahead place suggestions for a partial query (towns/cities).
+
+    Backs the web form's location autocomplete. Uses Open-Meteo geocoding, which is
+    built for name search and fine with this volume — unlike Nominatim, whose usage
+    policy forbids per-keystroke autocomplete. Returns a list of
+    ``{"label", "lat", "lng"}``; each label is a "City, Region, CC" string that
+    geocode() can resolve again on submit. Never raises — returns [] on any problem.
+    """
+    q = (query or "").strip()
+    name = q.split(",", 1)[0].strip() if "," in q else q   # match on the city part
+    if len(name) < 2:
+        return []
+    try:
+        # Over-fetch, then re-rank locally: Open-Meteo returns exact-name matches
+        # first, so a tiny same-named village outranks the populous place the user
+        # almost certainly means (e.g. "Moke, CD" ahead of "Mokena, IL").
+        r = requests.get(GEOCODE_URL, params={
+            "name": name, "count": 20,
+            "language": "en", "format": "json"}, timeout=8)
+        r.raise_for_status()
+        results = r.json().get("results") or []
+    except (requests.RequestException, ValueError):
+        return []
+    nlow = name.lower()
+    results.sort(key=lambda t: (
+        not str(t.get("name", "")).lower().startswith(nlow),   # prefix matches first
+        -(t.get("population") or 0),                            # then most populous
+    ))
+    out = []
+    for top in results:
+        label = ", ".join(
+            p for p in (top.get("name"), top.get("admin1"), top.get("country_code")) if p
+        )
+        if label and "latitude" in top and "longitude" in top:
+            out.append({"label": label, "lat": top["latitude"], "lng": top["longitude"]})
+        if len(out) >= count:
+            break
+    return out
+
+
 def _geocode_nominatim(place: str):
     """Street-address geocoding via OSM Nominatim (no key; handles house numbers).
 

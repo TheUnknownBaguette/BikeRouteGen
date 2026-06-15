@@ -12,8 +12,11 @@
     <div class="row">
       <div style="flex:2">
         <label for="location">Start point</label>
-        <input type="text" id="location" name="location" value="{{ d.location }}"
-               placeholder="Mokena, IL · an address · or lat,lng">
+        <div class="ac">
+          <input type="text" id="location" name="location" value="{{ d.location }}"
+                 placeholder="Mokena, IL · an address · or lat,lng"
+                 autocomplete="off" spellcheck="false">
+        </div>
       </div>
       <div>
         <label for="distance">Distance</label>
@@ -31,8 +34,9 @@
     <div class="row">
       <div>
         <label for="start">Start time</label>
-        <input type="text" id="start" name="start" value="{{ d.start }}"
-               placeholder="now or 2026-06-15 08:00">
+        <input type="datetime-local" id="start" name="start"
+               value="{{ d.start if 'T' in d.start else '' }}">
+        <button type="button" id="nowbtn" class="linklike">Set to now</button>
       </div>
       <div style="max-width:160px">
         <label for="ride_type">Ride type</label>

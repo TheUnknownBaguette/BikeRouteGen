@@ -57,6 +57,15 @@
     th,td { text-align:right; padding:6px 8px; border-bottom:1px solid var(--line); }
     th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align:left; }
     .muted { color:var(--dim); }
+    .ac { position:relative; }
+    .ac-list { position:absolute; z-index:30; left:0; right:0; top:100%; margin:3px 0 0;
+               background:#fff; border:1px solid var(--line); border-radius:8px; padding:4px;
+               list-style:none; max-height:260px; overflow:auto;
+               box-shadow:0 8px 24px rgba(20,30,50,.12); }
+    .ac-list li { padding:8px 10px; border-radius:6px; cursor:pointer; font-size:14px; }
+    .ac-list li.sel, .ac-list li:hover { background:var(--bg); }
+    .linklike { background:none; border:0; color:var(--accent); font-size:12px;
+                font-weight:600; cursor:pointer; padding:5px 0 0; }
     a.back { color:var(--accent); text-decoration:none; font-weight:600; }
     footer.credits { margin-top:40px; padding-top:16px; border-top:1px solid var(--line);
                      color:var(--dim); font-size:12px; line-height:1.7; }
