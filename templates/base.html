@@ -32,6 +32,14 @@
     button:disabled { opacity:.6; cursor:progress; }
     .err { background:#fff5f5; border:1px solid #ffc9c9; color:var(--bad);
            padding:12px 14px; border-radius:9px; margin:0 0 18px; }
+    .notice { background:#fffbe6; border:1px solid #ffe58f; color:#664d03;
+              padding:12px 14px; border-radius:9px; margin:0 0 18px; font-size:14px;
+              line-height:1.55; }
+    .notice a { color:#664d03; font-weight:600; }
+    .prose { max-width:none; }
+    .prose h2 { font-size:18px; margin:22px 0 6px; }
+    .prose p, .prose li { color:var(--ink); font-size:15px; }
+    .prose ul { padding-left:20px; }
     .badge { display:inline-block; font-size:12px; font-weight:700; letter-spacing:.03em;
              padding:2px 8px; border-radius:999px; vertical-align:middle; }
     .badge.rec { background:#e6f4ea; color:var(--good); }
@@ -61,6 +69,8 @@
     <p class="sub">{% block sub %}Wind-smart cycling routes — into the wind fresh, tailwind home.{% endblock %}</p>
     {% block content %}{% endblock %}
     <footer class="credits">
+      <a href="{{ url_for('about') }}">About, privacy &amp; disclaimer</a> ·
+      <a href="https://github.com/TheUnknownBaguette/BikeRouteGen">source on GitHub</a><br>
       Routing by <a href="https://openrouteservice.org/">OpenRouteService</a> ·
       map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors ·
       weather by <a href="https://open-meteo.com/">Open-Meteo.com</a>

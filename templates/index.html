@@ -1,5 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
+  <div class="notice">
+    <strong>Heads up:</strong> this is a hobby project, built fast with heavy AI
+    assistance (&ldquo;vibecoded&rdquo;). Routes are algorithmic suggestions and may
+    include busy or unsafe roads, wrong turns, or errors &mdash; <strong>always check a
+    route and current conditions before you ride. You ride at your own risk.</strong>
+    No warranty. <a href="{{ url_for('about') }}">About, privacy &amp; disclaimer →</a>
+  </div>
   {% if error %}<div class="err">Couldn't plan that one: {{ error }}</div>{% endif %}
   <form class="card" method="post" action="/plan" id="planform">
     <div class="row">
@@ -69,7 +76,7 @@
         <div style="max-width:130px">
           <label for="candidates">Candidates</label>
           <input type="number" id="candidates" name="candidates" value="{{ d.candidates }}"
-                 min="1" max="40">
+                 min="1" max="20">
         </div>
       </div>
       <div class="checks" style="margin-top:6px">
@@ -85,11 +92,5 @@
     </div>
   </form>
 
-  <script>
-    document.getElementById('planform').addEventListener('submit', function () {
-      document.getElementById('go').disabled = true;
-      document.getElementById('go').textContent = 'Planning…';
-      document.getElementById('working').style.display = 'inline';
-    });
-  </script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
 {% endblock %}

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}windroute — about, privacy &amp; disclaimer{% endblock %}
+{% block sub %}About, privacy &amp; disclaimer{% endblock %}
+{% block content %}
+  <div class="card prose">
+    <h2>What this is</h2>
+    <p>
+      <strong>windroute</strong> is a small hobby project that suggests wind-aware
+      cycling routes. It was built quickly with heavy AI assistance
+      (&ldquo;vibecoded&rdquo;) and is shared as-is for fun. It is not a commercial
+      product and comes with <strong>no warranty of any kind</strong>.
+    </p>
+
+    <h2>Ride-safety disclaimer</h2>
+    <ul>
+      <li>Routes are produced by an algorithm from imperfect map data. They may route
+        you onto busy roads, the wrong way down one-way streets, gravel, private
+        property, closed roads, or simply be wrong.</li>
+      <li><strong>Always review a route and check current road, traffic, and weather
+        conditions before you ride.</strong> Treat the suggestion as a starting point,
+        not turn-by-turn gospel.</li>
+      <li>Wind, surface, and elevation figures are estimates and can be stale or
+        inaccurate.</li>
+      <li><strong>You ride entirely at your own risk.</strong> The author accepts no
+        liability for any loss, injury, or damage arising from use of this site.</li>
+    </ul>
+
+    <h2>Privacy</h2>
+    <p>This site is deliberately minimal about data:</p>
+    <ul>
+      <li><strong>No accounts, no passwords, no cookies, no analytics or trackers,
+        and no database.</strong> Nothing you enter is sold or shared for advertising.</li>
+      <li><strong>What you enter</strong> (start location, distance, time, ride type,
+        and options) is used only to build your routes for that one request.</li>
+      <li><strong>Third-party lookups.</strong> To plan a route, your start location
+        and the coordinates derived from it are sent to the external services that do
+        the actual geocoding, weather, routing, and map-data work:
+        <a href="https://openrouteservice.org/">OpenRouteService</a> (routing),
+        <a href="https://open-meteo.com/">Open-Meteo</a> and the
+        <a href="https://www.weather.gov/">US National Weather Service</a> (wind),
+        <a href="https://nominatim.org/">OpenStreetMap Nominatim</a> (address geocoding),
+        and the <a href="https://overpass-api.de/">Overpass API</a> (road surface and
+        bike-lane data). Each has its own privacy policy.</li>
+      <li><strong>Generated files.</strong> The route maps and GPX files made for your
+        request are written to the server temporarily and automatically deleted after
+        about an hour. They are served over an unguessable link but are not otherwise
+        access-controlled, so treat them as semi-public while they exist.</li>
+      <li><strong>Server logs.</strong> The hosting provider may keep standard access
+        logs (such as IP address, timestamp, and the request) for reliability and to
+        prevent abuse.</li>
+      <li><strong>Your call on precision.</strong> You don&rsquo;t need to enter your
+        exact home address &mdash; a nearby town, intersection, or trailhead works fine,
+        and that&rsquo;s all that gets sent to the services above.</li>
+    </ul>
+
+    <h2>Contact</h2>
+    <p>
+      Questions, problems, or a privacy request? Open an issue on
+      <a href="https://github.com/TheUnknownBaguette/BikeRouteGen">the GitHub repo</a>.
+    </p>
+
+    <p><a class="back" href="/">← Back to planning</a></p>
+  </div>
+{% endblock %}
