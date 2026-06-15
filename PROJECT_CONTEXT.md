@@ -202,6 +202,12 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   shows the address as the label via `plan_routes(location_label=…)`), a **datetime-local**
   start-time picker, and an **ⓘ tooltip** on each advanced option (ride type / surface /
   ride-area / tolerance / candidates). Default location Chicago (privacy).
+- **Descriptive output names:** files auto-name from the ride —
+  `render.route_basename(when, dist_km, unit, shape, wind_from_deg)` →
+  `jun14-30mi-loop-Swind`, deduped via `render.dedupe_names`. CLI uses them when `-o` is
+  omitted (pass `-o` for the old `<out>`/`-alt1/-alt2`); the web app stores files under a
+  token but the GPX download link carries this as the browser `download=` name. The GPX
+  internal `<trk><name>` is already descriptive.
 - **Public-instance hardening + privacy page:** security headers, server-side input clamps,
   per-IP `/plan` rate limit, body-size cap, friendly error messages, and a `/about` page
   (privacy policy + ride-at-your-own-risk / "vibecoded, no warranty" disclaimer). All

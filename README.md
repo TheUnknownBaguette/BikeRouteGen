@@ -153,10 +153,13 @@ cd path\to\BikeRouteGen
 python -m windroute.cli plan -l "Chicago, IL" -d 30 -s "2026-06-14 08:00" -r road
 ```
 
-You'll get a ranked table in the terminal, then three route options: the
-recommendation as `route.png` / `route.gpx`, plus two alternatives as
-`route-alt1.*` and `route-alt2.*`. Import whichever GPX you like into Ride with
-GPS to refine.
+You'll get a ranked table in the terminal, then three route options, each written
+as a `.png` map + a `.gpx` track. By default the files are **auto-named** from the
+ride — date, distance, shape, and wind — e.g. `jun14-30mi-loop-Swind.gpx`,
+`jun14-28mi-rectangle-Swind.gpx`, so they're easy to tell apart on a head unit
+instead of all being "route". (Pass `-o myride` to force `myride.gpx` /
+`myride-alt1.*` / `myride-alt2.*` instead.) Import whichever GPX you like into
+Ride with GPS to refine.
 
 ### More examples
 
@@ -187,7 +190,7 @@ python -m windroute.cli plan -l "Chicago, IL" -d 40 --unit mi --ride-area auto
 | `--ride-area` | `auto` to stage to the nearest quiet zone, a compass direction (`south`, `SSE`) to stage to the best quiet zone that way, or a place / `lat,lng` to force one. Omit for a normal ride from the start. |
 | `--corrections / --no-corrections` | Apply your personal "I rode this" cache (on by default). |
 | `--candidates` | How many routes to generate and rank (default 12; more = better odds, slower, more API calls). |
-| `-o, --out` | Output file basename (default `route`). |
+| `-o, --out` | Output file basename. Omit to auto-name each file by date/distance/shape/wind (e.g. `jun14-30mi-loop-Swind.gpx`); pass a name to force `<name>.*` / `<name>-alt1.*`. |
 | `--api-key` | ORS key override (normally read from `ORS_API_KEY`). |
 
 ### Personal "I rode this" corrections

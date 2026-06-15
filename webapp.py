@@ -199,6 +199,13 @@ def plan():
     token = uuid.uuid4().hex[:8]
     to_mi = 1.0 / 1.609344
     ride_type = f.get("ride_type", "road")
+    unit = f.get("unit", "mi")
+    # Descriptive download names (files are stored under an unguessable token to avoid
+    # collisions; the browser saves each GPX as e.g. jun14-30mi-loop-Swind.gpx).
+    dlnames = render.dedupe_names([
+        render.route_basename(result.when, o.candidate.distance_km, unit,
+                              o.candidate.shape, result.wind.direction_from_deg)
+        for o in result.options])
     cards = []
     for i, opt in enumerate(result.options):
         c = opt.candidate
@@ -222,6 +229,7 @@ def plan():
             "path_pct": c.path_frac * 100, "lane_pct": c.bikelane_frac * 100,
             "cross": c.self_intersections,
             "png": f"out/{base.name}.png", "gpx": f"{base.name}.gpx",
+            "dlname": f"{dlnames[i]}.gpx",
         })
 
     ranked_rows = [{

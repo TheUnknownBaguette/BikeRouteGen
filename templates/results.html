@@ -31,7 +31,7 @@
         · {{ c.shape }}{% if c.cross > 2 %} · <span style="color:var(--warn)">{{ c.cross }} self-crossings</span>{% endif %}
       </div>
       <ul>{% for r in c.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
-      <a class="dl" href="{{ url_for('download', name=c.gpx) }}">⬇ Download GPX</a>
+      <a class="dl" href="{{ url_for('download', name=c.gpx) }}" download="{{ c.dlname }}">⬇ Download GPX</a>
     </div>
   {% endfor %}
 

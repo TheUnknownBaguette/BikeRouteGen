@@ -80,7 +80,8 @@ def plan(
              "home; a compass direction (e.g. 'south', 'SSE') stages to the best "
              "quiet zone that way; or pass a place/'lat,lng' to force a specific "
              "staging zone. Omit for a normal ride from the start point."),
-    out: str = typer.Option("route", "--out", "-o", help="Output file basename."),
+    out: str = typer.Option(None, "--out", "-o", help="Output file basename. Omit for "
+                            "auto-named files (e.g. jun14-30mi-loop-Swind.gpx)."),
     candidates: int = typer.Option(12, "--candidates", help="Routes to generate and rank."),
     corrections: bool = typer.Option(
         True, "--corrections/--no-corrections",
@@ -115,12 +116,20 @@ def plan(
         console.print(_candidates_table(ranked, ride_type, compare=(mode == "both"),
                                          show_lane=(mode in ("osm", "both"))))
 
-        # Write the recommendation to the base name and each alternative to
-        # <out>-alt1/-alt2, so all three can be opened and chosen between on the day.
+        # File names: if --out was given, use <out> / <out>-alt1/-alt2 (backwards
+        # compatible). Otherwise auto-name each route descriptively (date, distance,
+        # shape, wind) and de-dupe, so head units show more than just "route".
+        if out:
+            bases = [out if i == 0 else f"{out}-alt{i}" for i in range(len(options))]
+        else:
+            bases = render.dedupe_names([
+                render.route_basename(when, o.candidate.distance_km, unit,
+                                      o.candidate.shape, wind.direction_from_deg)
+                for o in options])
         blocks = []
         for i, opt in enumerate(options):
             c = opt.candidate
-            base = out if i == 0 else f"{out}-alt{i}"
+            base = bases[i]
             meta = {
                 "title": f"{distance:g} {unit} {ride_type} {c.shape} - {opt.headline}",
                 "location": label,

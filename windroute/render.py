@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import re
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -30,6 +31,34 @@ def write_gpx(coords, path, name="WindRoute"):
     with open(path, "w", encoding="utf-8") as f:
         f.write(gpx)
     return path
+
+
+def route_basename(when, distance_km, unit, shape, wind_from_deg):
+    """Descriptive, filesystem-safe base name for a route's files.
+
+    e.g. ``jun14-30mi-loop-Swind`` — ride date, the route's actual rounded
+    distance, its shape, and the compass the wind blows FROM. No extension.
+    Used as the default output name so files aren't all called "route".
+    """
+    date = when.strftime("%b%d").lower() if hasattr(when, "strftime") else "ride"
+    miles = unit.lower().startswith("mi")
+    dist = round(distance_km / 1.609344) if miles else round(distance_km)
+    shp = re.sub(r"[^a-z0-9-]+", "", str(shape).lower()) or "route"
+    wind = compass_label(wind_from_deg)
+    return f"{date}-{dist}{'mi' if miles else 'km'}-{shp}-{wind}wind"
+
+
+def dedupe_names(names):
+    """Make a list of base names unique in order, appending -2, -3, … on clashes."""
+    seen, out = {}, []
+    for n in names:
+        if n in seen:
+            seen[n] += 1
+            out.append(f"{n}-{seen[n]}")
+        else:
+            seen[n] = 1
+            out.append(n)
+    return out
 
 
 # --------------------------------------------------------------------------- #
