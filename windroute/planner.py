@@ -44,7 +44,7 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
                 shapes=("loop", "lollipop", "rectangle"), surface_source="ors",
                 ride_area=None, tolerance=3.0, candidates=12, corrections=True,
                 corrections_file=None, api_key=None, n_alternatives=2,
-                location_label=None, classify=False) -> PlanResult:
+                location_label=None, classify=False, refine=False) -> PlanResult:
     """Run the full planning pipeline and return a `PlanResult` (no printing/files).
 
     `shapes` may be a comma string ("loop,rectangle") or a sequence. `start` is
@@ -104,11 +104,12 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
 
     mode = surface_source.lower()
     coverage = None
+    osm_src = None                                # kept so refinement can re-classify
     if mode == "osm":
-        note, coverage = _apply_osm_surface(cands)
+        note, coverage, osm_src = _apply_osm_surface(cands)
         notes.append(note)
     elif mode == "both":
-        note, coverage = _compare_surface(cands)
+        note, coverage, osm_src = _compare_surface(cands)
         notes.append(note)
 
     # Optional regional surface providers (Task 5): OSM above is the universal
@@ -128,8 +129,9 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
     if conf_note:
         notes.append(conf_note)
 
+    corr_cache = None                            # kept so refinement applies the same notes
     if corrections:
-        note = _apply_corrections(cands, corrections_file)
+        note, corr_cache = _apply_corrections(cands, corrections_file)
         if note:
             notes.append(note)
 
@@ -148,6 +150,23 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
 
     ranked = engine.evaluate(cands, wind, ride_type, target_km, tolerance_km,
                              weights=weights, busy_baseline=busy_baseline)
+
+    # Local-search refinement (Task 6): squeeze more score out of the top few
+    # candidates by nudging their corners and re-routing, keeping moves that raise
+    # the FULL objective within tolerance. Off by default -> nothing below runs and
+    # behaviour is identical. Bounded ORS budget so the free tier is safe.
+    if refine:
+        note = _refine_candidates(
+            cands, ranked, api_key=api_key, ride_type=ride_type, wind=wind,
+            target_km=target_km, tolerance_km=tolerance_km, weights=weights,
+            busy_baseline=busy_baseline, osm_src=osm_src, corr_cache=corr_cache)
+        if note:
+            notes.append(note)
+        if classify and cands:                   # refined geometry can shift the floor
+            busy_baseline = min(c.busy_frac for c in cands)
+        ranked = engine.evaluate(cands, wind, ride_type, target_km, tolerance_km,
+                                 weights=weights, busy_baseline=busy_baseline)
+
     options = engine.select_route_options(ranked, wind, ride_type, target_km,
                                           n_alternatives=n_alternatives)
     return PlanResult(location_label=label, when=when, wind=wind, zone=zone,
@@ -206,15 +225,17 @@ def _apply_osm_surface(cands):
 
     One Overpass query covers all candidates. On any failure we leave the ORS
     baseline untouched and say so, rather than aborting the whole plan. Returns
-    (note, coverage) where coverage is the mean share of route length that had an
-    OSM surface tag nearby (None if unavailable) — the data-confidence signal.
+    (note, coverage, src) where coverage is the mean share of route length that had
+    an OSM surface tag nearby (None if unavailable) — the data-confidence signal —
+    and `src` is the built OverpassSurface (or None) so refinement can re-classify
+    nudged routes against the SAME index with no extra network calls.
     """
     try:
         src = surface.OverpassSurface().build([c.coords for c in cands])
     except Exception as exc:                              # network / Overpass down
-        return f"surface: OSM lookup failed ({exc}); kept ORS surface", None
+        return f"surface: OSM lookup failed ({exc}); kept ORS surface", None, None
     if not src.way_count and not src.bikelane_count:
-        return "surface: no OSM surface tags in this area; kept ORS surface", 0.0
+        return "surface: no OSM surface tags in this area; kept ORS surface", 0.0, None
     refined = lanes = bad = 0
     cov_sum = cov_n = 0.0
     for c in cands:
@@ -242,7 +263,7 @@ def _apply_osm_surface(cands):
     if src.quality_count:
         note += (f"; quality graded ({src.quality_count} ways, "
                  f"{bad} routes touch unrideable surface)")
-    return note, (cov_sum / cov_n if cov_n else None)
+    return note, (cov_sum / cov_n if cov_n else None), src
 
 
 def _compare_surface(cands):
@@ -258,9 +279,9 @@ def _compare_surface(cands):
     try:
         src = surface.OverpassSurface().build([c.coords for c in cands])
     except Exception as exc:                             # network / Overpass down
-        return f"surface cross-check: OSM lookup failed ({exc}); kept ORS only", None
+        return f"surface cross-check: OSM lookup failed ({exc}); kept ORS only", None, None
     if not src.way_count and not src.bikelane_count:
-        return "surface cross-check: no OSM surface tags in this area; kept ORS only", 0.0
+        return "surface cross-check: no OSM surface tags in this area; kept ORS only", 0.0, None
 
     disagree = 0
     cov_sum = cov_n = 0.0
@@ -286,7 +307,60 @@ def _compare_surface(cands):
     note = (f"surface cross-check: ORS vs OSM over {src.way_count} tagged ways; "
             f"{disagree}/{len(cands)} routes disagree >{SURFACE_DISAGREE*100:.0f}% "
             f"(scoring uses OSM)")
-    return note, (cov_sum / cov_n if cov_n else None)
+    return note, (cov_sum / cov_n if cov_n else None), src
+
+
+# Local-search refinement budget (Task 6): how many top candidates to refine and
+# the ORS-call cap per candidate, so the free-tier envelope stays bounded.
+REFINE_TOP = 2
+REFINE_CALLS_EACH = 5
+
+
+def _refine_candidates(cands, ranked, *, api_key, ride_type, wind, target_km,
+                       tolerance_km, weights, busy_baseline, osm_src, corr_cache):
+    """Local-search refine the top few candidates in place (work-plan Task 6).
+
+    Builds a full-objective `score_fn` — the SAME OSM overlays + corrections + scoring
+    the seeds got, reusing the prebuilt OverpassSurface index (no extra network) — and
+    hill-climbs each top candidate's corners via `engine.refine_candidate`, replacing
+    any improved seed in `cands`. The seed's own score is the baseline (never re-scored,
+    so its one-time corrections aren't double-applied). Returns a status note (or "").
+    """
+    profile = engine.PROFILE_BY_RIDE.get(ride_type, "cycling-regular")
+
+    def score_fn(c):
+        if osm_src is not None:                 # re-apply OSM tags (reuses the index)
+            res = osm_src.classify(c.coords)
+            if res:
+                c.paved_frac, c.unpaved_frac = res
+            lane = osm_src.classify_bikelane(c.coords)
+            if lane is not None:
+                c.bikelane_frac = lane
+            qual = osm_src.classify_quality(c.coords)
+            if qual is not None:
+                c.good_gravel_frac, c.unrideable_frac = qual
+        if corr_cache is not None:
+            corr_cache.apply(c)
+        engine.evaluate([c], wind, ride_type, target_km, tolerance_km,
+                        weights=weights, busy_baseline=busy_baseline)
+        return c.total_score
+
+    refinable = [c for c in ranked if c.waypoints][:REFINE_TOP]
+    if not refinable:
+        return ""
+    improved = used = 0
+    for seed in refinable:
+        best, calls = engine.refine_candidate(
+            seed, api_key, profile, target_km, tolerance_km, score_fn,
+            max_calls=REFINE_CALLS_EACH)
+        used += calls
+        if best is not seed:
+            cands[cands.index(seed)] = best
+            improved += 1
+    if not used:
+        return ""
+    return (f"refine: nudged {len(refinable)} top route(s), {improved} improved "
+            f"({used} extra ORS calls)")
 
 
 def _surface_confidence(mode, coverage):
@@ -313,12 +387,13 @@ def _surface_confidence(mode, coverage):
 def _apply_corrections(cands, corrections_file):
     """Overlay the personal correction cache on every candidate.
 
-    Returns "" (not nagging) when the cache is empty or none of the routes touch a
-    marked road, so a front-end can simply skip an empty note.
+    Returns (note, cache): note is "" (not nagging) when the cache is empty or no
+    route touches a marked road; `cache` is the built CorrectionCache (or None) so
+    refinement can apply the same notes to nudged routes.
     """
     cache = CorrectionCache.load(corrections_file)
     if not cache.records:
-        return ""
+        return "", None
     cache.build()
     touched = 0
     surf_km = traf_km = 0.0
@@ -330,7 +405,7 @@ def _apply_corrections(cands, corrections_file):
         traf_km += t
     if not touched:
         return (f"corrections: {len(cache.records)} on file, "
-                f"none on these routes")
+                f"none on these routes"), cache
     return (f"corrections: applied {len(cache.records)} personal note(s) - "
             f"{touched}/{len(cands)} routes adjusted "
-            f"({surf_km:.1f} km surface, {traf_km:.1f} km traffic)")
+            f"({surf_km:.1f} km surface, {traf_km:.1f} km traffic)"), cache

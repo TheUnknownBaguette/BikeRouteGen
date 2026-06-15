@@ -102,7 +102,7 @@ FORM_DEFAULTS = {
     "location": "Chicago, IL", "distance": "30", "unit": "mi", "start": "now",
     "ride_type": "road", "shapes": ["loop", "lollipop", "rectangle"],
     "surface_source": "ors", "ride_area": "", "tolerance": "3",
-    "candidates": "12", "corrections": True, "classify": False,
+    "candidates": "12", "corrections": True, "classify": False, "refine": False,
 }
 ALL_SHAPES = ["loop", "lollipop", "rectangle", "out-and-back", "roundtrip"]
 
@@ -140,10 +140,12 @@ def suggest():
 def _reshow(f, shapes, error, status):
     """Re-render the form with the submitted values and a message."""
     submitted = {**FORM_DEFAULTS, **{k: f.get(k, "") for k in FORM_DEFAULTS
-                                     if k not in ("shapes", "corrections", "classify")}}
+                                     if k not in ("shapes", "corrections", "classify",
+                                                  "refine")}}
     submitted["shapes"] = shapes
     submitted["corrections"] = "corrections" in f
     submitted["classify"] = "classify" in f
+    submitted["refine"] = "refine" in f
     return render_template("index.html", d=submitted, all_shapes=ALL_SHAPES,
                            error=error), status
 
@@ -185,6 +187,7 @@ def plan():
             candidates=int(_clamp(f.get("candidates", 12), 1, 20, 12)),
             corrections=("corrections" in f),
             classify=("classify" in f),
+            refine=("refine" in f),
             api_key=os.environ.get("ORS_API_KEY"),
             n_alternatives=2,
         )

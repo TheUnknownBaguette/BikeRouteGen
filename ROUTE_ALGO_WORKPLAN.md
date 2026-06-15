@@ -239,6 +239,17 @@ Surface the flag in the CLI table and web UI.
 
 ## Task 6 — 2-opt candidate refinement (optional, after 1–4)
 
+> **STATUS: DONE (2026-06-15), opt-in `--refine`.** `engine.refine_candidate` hill-climbs a
+> waypoint-built candidate's corners (loop/rectangle now carry `Candidate.waypoints`), re-routing
+> each move via `_candidate_from_waypoints` and keeping it only if the FULL objective improves
+> within tolerance. `planner._refine_candidates` supplies the `score_fn` (reuses the prebuilt
+> OverpassSurface index + correction cache — no extra network) and refines the top `REFINE_TOP`(2)
+> at `REFINE_CALLS_EACH`(5) ORS calls each, after `evaluate`/before `select_route_options`, then
+> re-evaluates. NOT textbook edge-2-opt — public ORS has no per-edge control (that's Task 7), so the
+> move is corner-nudge + re-route. Off by default → identical behaviour + zero extra calls; seed's
+> own score is the refine baseline (no double-counted corrections). Tests in `tests/test_weights.py`.
+> CLI `--refine`, web checkbox. **Next: Task 7 or 8 (both upside).**
+
 **Goal:** squeeze more wind score out of the candidates you already generate, without new infra.
 
 **Build:** a **pure** local-search refine step in `engine`, called by `planner` after

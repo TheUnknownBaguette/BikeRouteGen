@@ -107,8 +107,13 @@
       </div>
       <div class="checks" style="margin-top:6px">
         <label><input type="checkbox" name="classify"
-          {{ 'checked' if d.classify }}> Show the terrain archetype (diagnostic;
-          doesn't change scoring yet)</label>
+          {{ 'checked' if d.classify }}> Adapt tuning to the local terrain
+          (mountains, suburbs, coast …)</label>
+      </div>
+      <div class="checks" style="margin-top:6px">
+        <label><input type="checkbox" name="refine"
+          {{ 'checked' if d.refine }}> Refine the top routes (nudge + re-route for a
+          better score; a little slower)</label>
       </div>
     </details>
 

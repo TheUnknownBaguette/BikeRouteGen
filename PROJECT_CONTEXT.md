@@ -218,6 +218,21 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
     reads (surface, regions, zones) go through it, so the frequent overpass-api.de 504s no longer
     sink a read. Live-verified: a default `classify_region` succeeds via a mirror when the primary
     is down.
+- **Local-search candidate refinement** (work-plan Task 6 — DONE, opt-in `--refine`):
+  `engine.refine_candidate` hill-climbs a waypoint-built candidate (loop/rectangle, which now
+  carry their `Candidate.waypoints`): nudge each interior corner a small step, re-route that loop
+  via ORS (`_candidate_from_waypoints`), and KEEP a move only if it raises the **full** objective
+  (a `score_fn` supplied by the caller, so the non-additive surface/wind/quiet score is honored per
+  move) AND length stays within tolerance. `planner._refine_candidates` builds that `score_fn` —
+  reusing the prebuilt `OverpassSurface` index + correction cache (no extra network) so refined
+  routes are scored on the SAME basis as the seeds — and refines the top `REFINE_TOP` (2) candidates
+  at `REFINE_CALLS_EACH` (5) ORS calls each. Runs after `evaluate`, before `select_route_options`;
+  then re-evaluates. **Not** textbook edge-2-opt: public ORS exposes no per-edge control (that's
+  Task 7), so the achievable local move is corner-nudge + re-route. **Regression-safe:** off by
+  default (`refine=False`) → none of it runs, behaviour identical; the seed's own `total_score` is
+  the baseline so its one-time corrections aren't double-applied. Budget: adds ≤ `TOP*CALLS_EACH`
+  (~10) ORS calls only when `--refine` is set. Offline tests (`test_weights.py`: improves within
+  budget, length cap, skips non-refinable).
 - **Wind scoring:** `wind_score` rewards headwind on first half / tailwind home.
 - **Distance tolerance:** `-t/--tolerance` free buffer band; only excess is penalized.
 - **Elevation fix:** `engine._smoothed_ascent` (interpolate SRTM nodata, median +

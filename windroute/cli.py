@@ -93,8 +93,13 @@ def plan(
     classify: bool = typer.Option(
         False, "--classify",
         help="Classify the start's terrain archetype (grid-farmland, mountain, "
-             "suburban-sprawl, …) and show it. Diagnostic only for now — it does "
-             "not yet change scoring (that's a later work-plan task)."),
+             "suburban-sprawl, …) and adapt the tuning to it (weights, shapes, "
+             "quiet-zone scoring, busy normalization). Off by default."),
+    refine: bool = typer.Option(
+        False, "--refine",
+        help="Local-search refine the top routes: nudge their corners and re-route "
+             "to squeeze out a better score, within tolerance. A few extra ORS "
+             "calls; off by default."),
     api_key: str = typer.Option(None, "--api-key", envvar="ORS_API_KEY",
                                 help="OpenRouteService key (or set ORS_API_KEY)."),
 ):
@@ -107,7 +112,7 @@ def plan(
                 ride_type=ride_type, shapes=shapes, surface_source=surface_source,
                 ride_area=ride_area, tolerance=tolerance, candidates=candidates,
                 corrections=corrections, corrections_file=corrections_file,
-                api_key=api_key, n_alternatives=2, classify=classify)
+                api_key=api_key, n_alternatives=2, classify=classify, refine=refine)
 
         wind, label, when = result.wind, result.location_label, result.when
         mode = result.surface_mode

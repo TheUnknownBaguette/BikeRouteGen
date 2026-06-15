@@ -249,6 +249,67 @@ def test_good_gravel_bonus_gravel_only():
     assert _score(_cand(unpaved=0.4), "road") == _score(_cand(unpaved=0.4, good=0.4), "road")
 
 
+# --- local-search refinement (Task 6) -------------------------------------- #
+# Stub the ORS re-route so the hill-climb search logic is tested offline. The fake
+# builder turns waypoints into a candidate; a score that rewards pushing interior
+# corners north lets a nudge improve, exercising accept/length-cap/budget.
+def _seed_with_waypoints():
+    c = engine.Candidate(coords=[(0.0, 0.0), (0.01, 0.0)], distance_km=40.0,
+                         ascent_m=0.0, paved_frac=1.0, unpaved_frac=0.0, shape="loop",
+                         waypoints=[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 0.0)])
+    c.total_score = 2.0          # = sum of interior corner latitudes (1.0 + 1.0)
+    return c
+
+
+def _north_score(c):
+    s = sum(lat for lat, _ in c.waypoints[1:-1])
+    c.total_score = s
+    return s
+
+
+def _fake_builder(distance_km):
+    def build(api_key, profile, wp, shape, timeout):
+        c = engine.Candidate(coords=[(0.0, 0.0), (0.01, 0.0)], distance_km=distance_km,
+                             ascent_m=0.0, paved_frac=1.0, unpaved_frac=0.0, shape=shape)
+        c.waypoints = list(wp)
+        return c
+    return build
+
+
+def test_refine_improves_within_budget():
+    orig = engine._candidate_from_waypoints
+    engine._candidate_from_waypoints = _fake_builder(40.0)
+    try:
+        seed = _seed_with_waypoints()
+        best, calls = engine.refine_candidate(seed, "k", "cycling-regular", 40.0, 3.0,
+                                              _north_score, max_calls=4)
+        assert calls <= 4                       # ORS-call budget respected
+        assert best is not seed                 # a better config was found
+        assert best.total_score > seed.total_score   # refined >= (here >) seed
+    finally:
+        engine._candidate_from_waypoints = orig
+
+
+def test_refine_respects_length_cap():
+    orig = engine._candidate_from_waypoints
+    engine._candidate_from_waypoints = _fake_builder(999.0)   # every nudge way too long
+    try:
+        seed = _seed_with_waypoints()
+        best, _calls = engine.refine_candidate(seed, "k", "p", 40.0, 3.0,
+                                               _north_score, max_calls=4)
+        assert best is seed                     # out-of-tolerance moves all rejected
+    finally:
+        engine._candidate_from_waypoints = orig
+
+
+def test_refine_skips_non_refinable():
+    c = engine.Candidate(coords=[(0.0, 0.0), (0.01, 0.0)], distance_km=40.0,
+                         ascent_m=0.0, paved_frac=1.0, unpaved_frac=0.0,
+                         shape="staging")        # no waypoints
+    best, calls = engine.refine_candidate(c, "k", "p", 40.0, 3.0, _north_score)
+    assert best is c and calls == 0
+
+
 def _run():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

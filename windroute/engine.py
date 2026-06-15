@@ -100,6 +100,8 @@ class Candidate:
     score_coords: list = None   # subset of coords the wind score uses (staging: the
                                 # destination loop only, so the fixed transit legs to/from
                                 # a ride zone don't dominate the wind line). None = whole route.
+    waypoints: list = None      # the routable (lat,lng) corners this route was built from
+                                # (loop/rectangle only) — the handle local-search refine nudges.
     wind_score: float = 0.0     # first-half headwind minus second-half headwind
     surface_score: float = 0.0
     self_intersections: int = 0 # times the route crosses itself (tangle / messiness signal)
@@ -731,7 +733,7 @@ def _make_polygon_loop(api_key, profile, lat, lng, target_km, bearing, timeout,
                      ascent_m=_smoothed_ascent(eles) if eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
                      path_frac=path, path_run_frac=(path_run / dist if dist else 0.0),
-                     shape="loop")
+                     shape="loop", waypoints=list(verts))
 
 
 def _make_out_back(api_key, profile, lat, lng, target_km, bearing, timeout, detour=1.3):
@@ -880,11 +882,80 @@ def _make_rectangle(api_key, profile, lat, lng, target_km, bearing, timeout,
 
     coords, eles, dist, paved, unpaved, busy, path, path_run = _ors_directions(
         api_key, profile, pts, timeout)
+    verts = [(lat, lng), (a_lat, a_lng), (b_lat, b_lng), (c_lat, c_lng), (lat, lng)]
     return Candidate(coords=coords, distance_km=dist,
                      ascent_m=_smoothed_ascent(eles) if eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
                      path_run_frac=(path_run / dist if dist else 0.0),
-                     path_frac=path, shape="rectangle")
+                     path_frac=path, shape="rectangle", waypoints=verts)
+
+
+def _candidate_from_waypoints(api_key, profile, waypoints, shape, timeout):
+    """Route a through-path over `waypoints` ((lat,lng) corners) -> a Candidate.
+
+    The general form of the geometric builders, used by `refine_candidate` to rebuild
+    a loop/rectangle after nudging a corner. Carries the waypoints so the refined
+    route can be nudged again.
+    """
+    pts = [[lng, lat] for lat, lng in waypoints]                    # -> ORS [lng, lat]
+    coords, eles, dist, paved, unpaved, busy, path, path_run = _ors_directions(
+        api_key, profile, pts, timeout)
+    return Candidate(coords=coords, distance_km=dist,
+                     ascent_m=_smoothed_ascent(eles) if eles else 0.0,
+                     paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
+                     path_frac=path, path_run_frac=(path_run / dist if dist else 0.0),
+                     shape=shape, waypoints=list(waypoints))
+
+
+def refine_candidate(cand, api_key, profile, target_km, tolerance_km, score_fn,
+                     timeout=40, step_km=0.4, max_calls=6):
+    """Local-search refine a waypoint-built candidate (work-plan Task 6).
+
+    Hill-climb: nudge each interior corner a small step in the cardinal directions,
+    re-route the whole loop through ORS, and KEEP the move only if it raises the
+    full-objective score (`score_fn(candidate) -> total_score`, supplied by the
+    caller so the non-additive surface/wind/quiet objective is honored per move)
+    AND the length stays within tolerance of target. First-improvement, capped at
+    `max_calls` ORS calls so the free-tier budget stays bounded.
+
+    The seed's existing `total_score` is the baseline (we never re-score it, so the
+    caller's one-time overlays — corrections etc. — aren't double-applied). Returns
+    (best_candidate, ors_calls_used); `best is cand` when nothing beat the seed.
+    """
+    if not cand.waypoints or len(cand.waypoints) < 4 or max_calls <= 0:
+        return cand, 0
+    best = cand
+    best_score = cand.total_score
+    # Hold length: never drift further from target than the seed already is (or the
+    # free tolerance band, whichever is larger) — a great wind line that's way too
+    # long is not a win.
+    allowed_dev = max(tolerance_km, abs(cand.distance_km - target_km))
+    calls = 0
+    improved = True
+    while improved and calls < max_calls:
+        improved = False
+        for k in range(1, len(best.waypoints) - 1):        # interior corners only
+            for brg in (0.0, 90.0, 180.0, 270.0):
+                if calls >= max_calls:
+                    break
+                wp = list(best.waypoints)
+                wp[k] = _destination(wp[k][0], wp[k][1], brg, step_km)
+                try:
+                    cand2 = _candidate_from_waypoints(api_key, profile, wp,
+                                                      best.shape, timeout)
+                except requests.HTTPError:
+                    calls += 1
+                    continue
+                calls += 1
+                if abs(cand2.distance_km - target_km) > allowed_dev:
+                    continue
+                if score_fn(cand2) > best_score:
+                    best, best_score = cand2, cand2.total_score
+                    improved = True
+                    break                                  # first-improvement: restart
+            if improved:
+                break
+    return best, calls
 
 
 def generate_candidates(lat, lng, target_km, ride_type, api_key,

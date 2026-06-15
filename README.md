@@ -192,6 +192,7 @@ python -m windroute.cli plan -l "Asheville, NC" -d 30 --classify
 | `--surface-source` | `ors` (default), `osm` (finer OSM tags + bike lanes), or `both` (cross-check). |
 | `--ride-area` | `auto` to stage to the nearest quiet zone, a compass direction (`south`, `SSE`) to stage to the best quiet zone that way, or a place / `lat,lng` to force one. Omit for a normal ride from the start. |
 | `--classify` | Detect the terrain (grid-farmland, mountain, suburban, coastal, …) and **adapt the tuning to it** — weights, route shapes, quiet-zone scoring, and a region-normalized busy penalty. Off by default (your home grid-farmland results are unchanged without it). |
+| `--refine` | Local-search the top routes: nudge their corners and re-route to squeeze out a better score, keeping length in tolerance. Costs a few extra routing calls; off by default. |
 | `--corrections / --no-corrections` | Apply your personal "I rode this" cache (on by default). |
 | `--candidates` | How many routes to generate and rank (default 12; more = better odds, slower, more API calls). |
 | `-o, --out` | Output file basename. Omit to auto-name each file by date/distance/shape/wind (e.g. `jun14-30mi-loop-Swind.gpx`); pass a name to force `<name>.*` / `<name>-alt1.*`. |
