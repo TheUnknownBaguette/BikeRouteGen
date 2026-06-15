@@ -337,3 +337,20 @@ his improved route-making). Every tuning decision below is backed by this:
   county road-commission GIS for local gravel data (Michigan's open layer lacks surface).
 - **Watch the staging value-add on a cross-wind (E/W) day** — logically sound but never
   yet seen winning live (test days had SW wind, which already favors riding south).
+- **Smarter route optimization (algorithm)** — prompted by a "use weighted graph
+  optimization / AI to make the map" suggestion. Assessment: ORS *already* does weighted
+  graph optimization (A*/CH on the OSM graph) per leg, and "AI to create the map" is a
+  non-starter (OSM is ground truth; a generative map would hallucinate roads). The real
+  reason it's generate-and-score, not one clever Dijkstra: the objective is **non-additive /
+  global** — "headwind while fresh, tailwind home" depends on which half of the loop an edge
+  is in, plus target-length + longest-contiguous-path + self-crossings are whole-route
+  properties. That makes it an **orienteering-class (NP-hard) problem**; komoot/ORS
+  `round_trip` are all heuristics too. Realistic improvements, best bang-for-buck first:
+  (1) **deterministic local-search/2-opt refinement** on existing candidates — edge swaps on
+  the real graph to raise wind score while holding length; fits the current architecture, no
+  new infra (offered to prototype, deferred). (2) **wind-biased edge weights** for the
+  outbound leg (cost lowered for edges pointing into the headwind), route out to a turnaround
+  then home on different roads — needs a router we control (self-hosted ORS/Valhalla/
+  GraphHopper; public ORS exposes no per-edge custom weights, and its `quiet` weighting is a
+  no-op). (3) full metaheuristic (SA/genetic/ant-colony) — most principled, biggest build,
+  still heuristic on the length constraint, uncertain payoff.
