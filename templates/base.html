@@ -66,6 +66,18 @@
     .ac-list li.sel, .ac-list li:hover { background:var(--bg); }
     .linklike { background:none; border:0; color:var(--accent); font-size:12px;
                 font-weight:600; cursor:pointer; padding:5px 0 0; }
+    .help { display:inline-block; margin-left:5px; width:15px; height:15px; line-height:15px;
+            text-align:center; border-radius:50%; background:var(--line); color:var(--dim);
+            font-size:11px; font-weight:700; font-style:normal; cursor:help; position:relative;
+            vertical-align:middle; user-select:none; }
+    .help:hover, .help:focus { background:var(--accent); color:#fff; outline:none; }
+    .help::after { content:attr(data-tip); position:absolute; bottom:150%; left:0;
+            width:240px; max-width:64vw; background:var(--ink); color:#fff; text-align:left;
+            font-size:12px; font-weight:400; line-height:1.45; padding:8px 10px; border-radius:8px;
+            box-shadow:0 8px 24px rgba(20,30,50,.18); opacity:0; visibility:hidden;
+            transition:opacity .12s ease; z-index:50; pointer-events:none; white-space:normal; }
+    .help.left::after { left:auto; right:0; }
+    .help:hover::after, .help:focus::after { opacity:1; visibility:visible; }
     a.back { color:var(--accent); text-decoration:none; font-weight:600; }
     footer.credits { margin-top:40px; padding-top:16px; border-top:1px solid var(--line);
                      color:var(--dim); font-size:12px; line-height:1.7; }

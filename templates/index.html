@@ -14,7 +14,7 @@
         <label for="location">Start point</label>
         <div class="ac">
           <input type="text" id="location" name="location" value="{{ d.location }}"
-                 placeholder="Mokena, IL · an address · or lat,lng"
+                 placeholder="Chicago, IL · an address · or lat,lng"
                  autocomplete="off" spellcheck="false">
           <input type="hidden" name="picked_lat" id="picked_lat">
           <input type="hidden" name="picked_lng" id="picked_lng">
@@ -42,7 +42,10 @@
         <button type="button" id="nowbtn" class="linklike">Set to now</button>
       </div>
       <div style="max-width:160px">
-        <label for="ride_type">Ride type</label>
+        <label for="ride_type">Ride type
+          <span class="help left" tabindex="0"
+                aria-label="Road avoids gravel and prefers paved roads and bike lanes. Gravel seeks out unpaved roads instead."
+                data-tip="Road avoids gravel and prefers paved roads and bike lanes. Gravel seeks out unpaved roads instead.">i</span></label>
         <select id="ride_type" name="ride_type">
           <option value="road" {{ 'selected' if d.ride_type=='road' }}>road</option>
           <option value="gravel" {{ 'selected' if d.ride_type=='gravel' }}>gravel</option>
@@ -63,7 +66,10 @@
       </div>
       <div class="row" style="margin-top:14px">
         <div>
-          <label for="surface_source">Surface data</label>
+          <label for="surface_source">Surface data
+            <span class="help" tabindex="0"
+                  aria-label="Where road-surface data comes from. ors is the fast default; osm reads finer OpenStreetMap tags and on-road bike lanes; both cross-checks them and flags disagreements."
+                  data-tip="Where road-surface data comes from. ors is the fast default; osm reads finer OpenStreetMap tags and on-road bike lanes; both cross-checks them and flags disagreements.">i</span></label>
           <select id="surface_source" name="surface_source">
             {% for v in ['ors','osm','both'] %}
               <option value="{{ v }}" {{ 'selected' if d.surface_source==v }}>{{ v }}</option>
@@ -71,17 +77,26 @@
           </select>
         </div>
         <div>
-          <label for="ride_area">Ride-area staging</label>
+          <label for="ride_area">Ride-area staging
+            <span class="help" tabindex="0"
+                  aria-label="Optionally ride somewhere quieter first. Blank starts right here; auto finds the nearest quiet countryside; a direction like south heads that way; or name a place to aim for."
+                  data-tip="Optionally ride somewhere quieter first. Blank starts right here; auto finds the nearest quiet countryside; a direction like south heads that way; or name a place to aim for.">i</span></label>
           <input type="text" id="ride_area" name="ride_area" value="{{ d.ride_area }}"
                  placeholder="blank · auto · a direction (S, SE) · a place">
         </div>
         <div style="max-width:130px">
-          <label for="tolerance">Tolerance</label>
+          <label for="tolerance">Tolerance
+            <span class="help left" tabindex="0"
+                  aria-label="How far over or under your target distance is OK with no penalty, in your chosen unit. Routes within this band are not docked for length."
+                  data-tip="How far over or under your target distance is OK with no penalty, in your chosen unit. Routes within this band are not docked for length.">i</span></label>
           <input type="number" id="tolerance" name="tolerance" value="{{ d.tolerance }}"
                  step="any" min="0">
         </div>
         <div style="max-width:130px">
-          <label for="candidates">Candidates</label>
+          <label for="candidates">Candidates
+            <span class="help left" tabindex="0"
+                  aria-label="How many routes to generate and compare. More improves the odds of a good match but is slower and uses more API calls."
+                  data-tip="How many routes to generate and compare. More improves the odds of a good match but is slower and uses more API calls.">i</span></label>
           <input type="number" id="candidates" name="candidates" value="{{ d.candidates }}"
                  min="1" max="20">
         </div>

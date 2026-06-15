@@ -99,7 +99,7 @@ def _security_headers(resp):
 
 # Defaults shown in the form (match the CLI's).
 FORM_DEFAULTS = {
-    "location": "Mokena, IL", "distance": "30", "unit": "mi", "start": "now",
+    "location": "Chicago, IL", "distance": "30", "unit": "mi", "start": "now",
     "ride_type": "road", "shapes": ["loop", "lollipop", "rectangle"],
     "surface_source": "ors", "ride_area": "", "tolerance": "3",
     "candidates": "12", "corrections": True,
