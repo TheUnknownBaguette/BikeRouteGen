@@ -67,6 +67,10 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
     if location_label:                    # caller picked an exact point; keep its name
         label = location_label
     wind = engine.get_wind(lat, lng, when)
+    if not wind.known:
+        notes.append("wind: couldn't fetch a forecast for this location — planned "
+                     "without a wind line (routes ranked on surface, traffic, and "
+                     "shape).")
 
     # Step 0 (Task 1): classify the surrounding terrain so later steps can adapt.
     # Off by default and DELIBERATELY does not feed scoring/zone weights yet — that

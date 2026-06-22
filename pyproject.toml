@@ -1,6 +1,36 @@
-# Minimal project config. Today this carries only the pytest settings (Task A1);
-# the full [project] table + dependency pins + dev/discord extras land in
-# CODE_HEALTH_WORKPLAN Task B2, at which point the per-test sys.path hacks can go.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "windroute"
+version = "0.1.0"
+description = "Wind-smart cycling route generator (ride out into the wind, home with the tailwind)."
+readme = "README.md"
+requires-python = ">=3.9"   # discord_bot uses asyncio.to_thread (3.9+)
+
+# Runtime deps with upper bounds so a future MAJOR (e.g. Flask 4, Pillow 13) can't
+# silently break a fresh install months from now. Keep these in sync with
+# requirements.txt (which run.bat installs for the double-click web-app path).
+dependencies = [
+    "requests>=2.31,<3",
+    "typer>=0.12,<1.0",
+    "rich>=13.7,<16",
+    "python-dateutil>=2.9,<3",
+    "staticmap>=0.5.7,<1.0",
+    "Pillow>=10.0,<13",
+    "Flask>=3.0,<4",
+    "waitress>=3.0,<4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+discord = ["discord.py>=2.0,<3"]
+
+[tool.setuptools]
+# Explicit so editable installs don't try to package tests/ or the top-level data dirs.
+packages = ["windroute"]
+py-modules = ["webapp", "discord_bot"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

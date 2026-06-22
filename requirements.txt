@@ -1,8 +1,11 @@
-requests>=2.31
-typer>=0.12
-rich>=13.7
-python-dateutil>=2.9
-staticmap>=0.5.7
-Pillow>=10.0
-Flask>=3.0
-waitress>=3.0      # cross-platform production server (free host + self-host later)
+# Runtime deps for the double-click web-app path (run.bat installs these).
+# Keep in sync with pyproject.toml [project].dependencies. Upper bounds guard
+# against a surprise MAJOR release breaking a fresh install later.
+requests>=2.31,<3
+typer>=0.12,<1.0
+rich>=13.7,<16
+python-dateutil>=2.9,<3
+staticmap>=0.5.7,<1.0
+Pillow>=10.0,<13
+Flask>=3.0,<4
+waitress>=3.0,<4      # cross-platform production server (free host + self-host later)

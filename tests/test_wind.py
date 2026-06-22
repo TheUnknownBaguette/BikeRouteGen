@@ -116,6 +116,53 @@ def test_valhalla_decode_polyline():
     assert abs(coords[2][0] - 43.252) < 1e-3
 
 
+# --- wind fetch degradation (CODE_HEALTH Task B1) -------------------------- #
+def test_get_wind_degrades_on_dual_failure():
+    """Both sources failing returns a calm known=False Wind, never raises."""
+    import datetime as dt
+    saved = (engine._wind_from_open_meteo, engine._wind_from_nws)
+
+    def boom(*a, **k):
+        raise requests.RequestException("down")
+    engine._wind_from_open_meteo = boom
+    engine._wind_from_nws = boom
+    try:
+        w = engine.get_wind(41.5, -87.85, dt.datetime(2026, 6, 21, 8))
+    finally:
+        engine._wind_from_open_meteo, engine._wind_from_nws = saved
+    assert w.known is False
+    assert w.speed_mph == 0.0
+
+
+def test_get_wind_falls_back_to_nws_then_succeeds():
+    """Open-Meteo failing but NWS working still returns a known wind."""
+    import datetime as dt
+    saved = (engine._wind_from_open_meteo, engine._wind_from_nws)
+
+    def boom(*a, **k):
+        raise requests.RequestException("down")
+    engine._wind_from_open_meteo = boom
+    engine._wind_from_nws = lambda *a, **k: engine.Wind(180.0, 9.0, 14.0, "x")
+    try:
+        w = engine.get_wind(41.5, -87.85, dt.datetime(2026, 6, 21, 8))
+    finally:
+        engine._wind_from_open_meteo, engine._wind_from_nws = saved
+    assert w.known is True and w.speed_mph == 9.0
+
+
+def test_evaluate_neutralizes_unknown_wind():
+    """An unknown wind makes the wind term a constant across candidates."""
+    a = engine.Candidate(coords=[(41.50, -87.85), (41.55, -87.85), (41.55, -87.90)],
+                         distance_km=40.0, ascent_m=0.0, paved_frac=1.0, unpaved_frac=0.0)
+    b = engine.Candidate(coords=[(41.50, -87.85), (41.50, -87.80), (41.45, -87.80)],
+                         distance_km=40.0, ascent_m=0.0, paved_frac=1.0, unpaved_frac=0.0)
+    calm = engine.Wind(0.0, 0.0, 0.0, "", known=False)
+    ranked = engine.evaluate([a, b], calm, "road", 40.0, tolerance_km=3.0)
+    assert all(c.wind_score == 0.0 for c in ranked)          # no directional score
+    # Identical except for wind direction → identical totals when wind is neutral.
+    assert abs(ranked[0].total_score - ranked[1].total_score) < 1e-9
+
+
 def _run():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

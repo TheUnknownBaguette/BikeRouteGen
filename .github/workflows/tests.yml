@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install -e ".[dev]"   # builds pyproject + installs runtime + pytest
 
       - name: Run tests
         run: pytest

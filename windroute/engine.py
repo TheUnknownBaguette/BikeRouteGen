@@ -76,6 +76,9 @@ class Wind:
     speed_mph: float
     gust_mph: float
     valid_time: str             # local ISO timestamp the forecast applies to
+    known: bool = True          # False when no forecast could be fetched (calm fallback);
+                                # `evaluate` then neutralizes the wind term so it doesn't
+                                # bias direction, and the planner adds a user-facing note.
 
     @property
     def into_wind_bearing(self) -> float:
@@ -366,11 +369,22 @@ def get_wind(lat: float, lng: float, when: dt.datetime) -> Wind:
     (e.g. a free hosting tier) — fall back to the US National Weather Service
     (`api.weather.gov`, keyless, US-only). Locally Open-Meteo just works and NWS is
     never touched.
+
+    If BOTH sources fail (e.g. a non-US start when Open-Meteo is throttled — NWS
+    404s outside the US), return a calm `Wind` flagged `known=False` rather than
+    letting the exception kill the whole plan. `evaluate` neutralizes the wind term
+    for an unknown wind and the planner surfaces a note, so a route still comes back.
     """
+    fetch_errors = (requests.RequestException, ValueError, KeyError, IndexError)
     try:
         return _wind_from_open_meteo(lat, lng, when)
-    except requests.RequestException:
+    except fetch_errors:
+        pass
+    try:
         return _wind_from_nws(lat, lng, when)
+    except fetch_errors:
+        return Wind(direction_from_deg=0.0, speed_mph=0.0, gust_mph=0.0,
+                    valid_time="", known=False)
 
 
 def _wind_from_open_meteo(lat: float, lng: float, when: dt.datetime) -> Wind:
@@ -1639,8 +1653,14 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
     w = weights or weights_for(None, ride_type)
     into = wind.into_wind_bearing
     for c in candidates:
-        c.wind_score = wind_score(c.score_coords or c.coords, into)
-        wind_norm = (c.wind_score + 2.0) / 4.0           # -> ~0..1
+        if wind.known:
+            c.wind_score = wind_score(c.score_coords or c.coords, into)
+            wind_norm = (c.wind_score + 2.0) / 4.0       # -> ~0..1
+        else:
+            # No forecast available (planner notes it): make the wind term a
+            # constant so it doesn't bias direction — rank on the other signals.
+            c.wind_score = 0.0
+            wind_norm = 0.5
 
         # `surface_score` is the display figure (paved on road / unpaved on gravel);
         # the SCORING is fully weights-driven, no ride-type branch in the formula.

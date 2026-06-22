@@ -180,7 +180,15 @@ rides clobber each other's files.
 
 ## Task B1 — Wind fallback hardening (no crash on dual outage / non-US)
 
-> **STATUS: NOT STARTED.**
+> **STATUS: DONE (2026-06-21).** `get_wind` now wraps BOTH sources (Open-Meteo →
+> NWS) against `(RequestException, ValueError, KeyError, IndexError)`; if both fail it
+> returns a calm `Wind(..., known=False)` instead of letting the NWS 404 (non-US) /
+> dual outage propagate. Added `Wind.known: bool = True`; `evaluate` neutralizes the
+> wind term when `known=False` (`wind_score=0.0`, `wind_norm=0.5`) so it can't bias
+> direction — ranking falls to surface/traffic/path/shape. `planner` appends a
+> user-facing note. Happy path byte-identical (default `known=True`). Tests in
+> `tests/test_wind.py` (dual-failure degrades, NWS fallback still succeeds, evaluate
+> neutralizes). Full suite: **76 passed.**
 
 **Problem:** `engine.get_wind` catches Open-Meteo's `RequestException` and falls to
 NWS — but NWS 404s outside the US, and that `HTTPError` is raised *from inside* the
@@ -202,7 +210,17 @@ when Open-Meteo is throttled = crash, not a degraded plan.
 
 ## Task B2 — Packaging: pin deps, `pyproject`, dev/optional extras
 
-> **STATUS: NOT STARTED.** (Coordinate with A1's pytest dep and B/C imports.)
+> **STATUS: DONE (2026-06-21).** `pyproject.toml` now carries a full `[project]` table
+> (installable: `pip install -e .[dev]` / `.[discord]`), runtime deps with upper
+> bounds (`<3`, `<4`, `Pillow<13`, etc.) so a surprise MAJOR can't break a fresh
+> install, and `[build-system]` + `[tool.setuptools]` (packages=windroute,
+> py-modules=webapp,discord_bot). `requirements.txt` updated to the same bounds and
+> kept as the source for `run.bat` (double-click path stays build-tool-free). CI now
+> installs via `pip install -e ".[dev]"` (also validates the build). Verified: editable
+> install builds, `import windroute, webapp` works from an unrelated cwd, suite still
+> **76 passed.** Decision: kept the per-file `sys.path.insert` + `_run()` blocks (they
+> serve the `python tests/test_x.py` direct-run path the project values); `conftest.py`
+> covers the `pytest` path. So the hacks stay by choice, not removed.
 
 **Problem:** `requirements.txt` has no upper bounds (a future Flask 4 / Pillow 11 can
 break a fresh `run.bat` months from now), and `discord.py` (optional front-end) and
