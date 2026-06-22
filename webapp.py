@@ -35,6 +35,10 @@ MAX_AGE_S = 3600                      # delete generated maps/gpx older than thi
 # Each plan fans out to ~12-15 OpenRouteService calls, so a public instance needs a
 # throttle to protect the shared free-tier quota from casual abuse. Simple in-memory
 # sliding window per client IP (per worker process — good enough for a hobby host).
+# SCALING CAVEAT: this state is per-process, so running multiple waitress threads/
+# workers or multiple instances multiplies the effective limit by that count. If you
+# ever raise the worker count, move this to a shared store (e.g. Redis) or the limit
+# silently weakens. See CODE_HEALTH_WORKPLAN Task D3.
 RL_MAX = 12                          # max plans ...
 RL_WINDOW_S = 300                    # ... per IP per this many seconds
 _rl_lock = threading.Lock()
@@ -199,6 +203,11 @@ def plan():
         return _reshow(f, shapes, "Something went wrong building that plan. Check your "
                        "inputs and try again; if it persists the routing or weather "
                        "service may be temporarily unavailable.", 500)
+
+    # Observability (Task C2): per-plan ORS usage + process total, so a hosted
+    # instance can see how fast it's burning the ~2000/day free-tier quota.
+    app.logger.info("plan ok: %d ORS calls (process total %d)",
+                    result.ors_calls, engine.ors_call_total())
 
     _sweep_old_files()
     token = uuid.uuid4().hex[:8]

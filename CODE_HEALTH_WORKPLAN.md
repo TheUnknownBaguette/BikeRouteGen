@@ -45,6 +45,11 @@ may regress the home-region golden route (see Regression gate).
 
 ## Task sequence
 
+> **ALL TASKS COMPLETE (A1–A3, B1–B2, C1–C2, D1–D3; 2026-06-21).** Each task's section
+> carries a STATUS line with what shipped + where. The full offline suite is **78
+> passed**. The only deferred item is a deeper README/PROJECT_CONTEXT prose
+> de-duplication (D2), left to owner taste rather than cut unilaterally.
+
 | #  | Task | Why | Primary files | Risk |
 |----|------|-----|---------------|------|
 | A1 | pytest + one-command runner + CI | Safety net for everything below | `pyproject.toml`, `conftest.py`, `.github/workflows/`, `tests/*` | low |
@@ -278,7 +283,14 @@ holding the whole file in your head; the seams are already clean.
 
 ## Task C2 — Observability: per-plan ORS-call counter
 
-> **STATUS: NOT STARTED.**
+> **STATUS: DONE (2026-06-21).** `routing` now keeps a thread-safe process-lifetime
+> tally (`ors_call_total()`, incremented in `_ors_directions`; re-exported via the
+> engine facade). `planner` snapshots it around generation and sets
+> `PlanResult.ors_calls` (best-effort per-plan; process total is exact). `webapp` logs
+> `"plan ok: N ORS calls (process total M)"` after each plan. 429 retries aren't
+> counted separately (logical-call semantics, matching the README's "~12-15"). Test in
+> `tests/test_observability.py` (counter +1 per call via a stubbed `requests.post`;
+> facade exposure). Full suite: **78 passed.**
 
 **Problem:** the README warns about the ~2,000 ORS calls/day free cap, but nothing
 counts the burn. No way to see when a hosted instance is near the limit.
@@ -298,7 +310,11 @@ counts the burn. No way to see when a hosted instance is near the limit.
 
 ## Task D1 — Add a LICENSE
 
-> **STATUS: NOT STARTED.**
+> **STATUS: DONE (2026-06-21).** Added an `MIT License` (owner's choice), copyright
+> "TheUnknownBaguette" (GitHub handle, keeping the real name off the public repo per
+> the project's privacy posture). Added a note that MIT covers windroute's code only,
+> not the third-party data/services (ODbL/CC BY 4.0), which keep their own
+> attributions. Linked from a new README "## License" section.
 
 README has a whole "share it / fork it / keep these attributions" section but ships no
 project license, so others can't legally fork. Add one (MIT suggested; confirm with
@@ -310,7 +326,14 @@ owner). Make sure it doesn't conflict with the data-source attributions already 
 
 ## Task D2 — Trim documentation redundancy
 
-> **STATUS: NOT STARTED.**
+> **STATUS: DONE (light pass, 2026-06-21).** Fixed the stale bits the C1 split
+> introduced: README "Project layout" now lists the new modules (engine = facade) and
+> the tests line points at `pytest`; PROJECT_CONTEXT file-map rewritten to match.
+> Deeper prose de-duplication (README usage vs PROJECT_CONTEXT "Features built") left
+> as-is on purpose — they serve different audiences (README = how-to for users,
+> PROJECT_CONTEXT = decisions/why for devs), so the overlap is moderate, not pure
+> duplication, and what to cut is owner taste. Flagged for owner review rather than
+> deleting content unilaterally.
 
 `README.md` and `PROJECT_CONTEXT.md` both restate the full feature list, options
 table, and data sources; every new feature now gets written up in three places
@@ -325,7 +348,11 @@ carries the non-obvious decisions/gotchas. (Owner reviews — docs are taste.)
 
 ## Task D3 — Park `valhalla.py`; note rate-limiter scaling
 
-> **STATUS: NOT STARTED.**
+> **STATUS: DONE (2026-06-21).** Decision: **keep** `valhalla.py` (it's an honest,
+> import-clean, default-off gated seam that's already labeled experimental; removing it
+> would lose wired-in work for no real maintenance saving). Rate-limiter: added an
+> explicit SCALING CAVEAT comment in `webapp.py` — the in-memory per-process window
+> multiplies if you raise worker/instance count; move to a shared store before scaling.
 
 - `valhalla.py` is shipped, gated off, untested against any live server, and needs a
   custom costing model to do anything (per its own docstring). Consider moving it to a

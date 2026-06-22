@@ -38,6 +38,7 @@ class PlanResult:
     surface_mode: str = "ors"    # "ors" | "osm" | "both"
     region: "regions.RegionProfile | None" = None   # terrain archetype (when classify=True)
     data_confidence: str = "ok"  # "ok" | "low" | "ors-baseline" (Task 5 degradation)
+    ors_calls: int = 0           # ORS directions calls this plan made (best-effort; Task C2)
 
 
 def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
@@ -111,6 +112,7 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
         if zone:
             shape_list = shape_list + ["staging"]
 
+    ors_start = engine.ors_call_total()           # count this plan's routing calls (Task C2)
     cands = engine.generate_candidates(
         lat, lng, target_km, ride_type, api_key, n=candidates,
         shapes=shape_list, into_wind_bearing=wind.into_wind_bearing, zone=zone,
@@ -185,7 +187,8 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
                                           n_alternatives=n_alternatives)
     return PlanResult(location_label=label, when=when, wind=wind, zone=zone,
                       ranked=ranked, options=options, notes=notes, surface_mode=mode,
-                      region=region, data_confidence=data_confidence)
+                      region=region, data_confidence=data_confidence,
+                      ors_calls=engine.ors_call_total() - ors_start)
 
 
 # --------------------------------------------------------------------------- #

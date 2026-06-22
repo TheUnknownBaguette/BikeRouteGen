@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import math
+import threading
 import time
 
 import requests
@@ -14,6 +15,26 @@ import requests
 from . import valhalla
 from .geometry import _bearing, _destination, _haversine_km, _polyline_km, _thin
 from .models import Candidate
+
+# Observability (CODE_HEALTH Task C2): a process-lifetime tally of ORS directions
+# calls. The process total is exact (one lock) and is the useful signal for the
+# ~2000/day free-tier cap the README warns about; planner snapshots it before/after
+# a plan for a best-effort per-plan count (the delta can include other plans' calls
+# under concurrency, but the total is always exact). 429 back-off retries are not
+# counted separately — this tracks logical routing calls (the README's "~12-15").
+_ORS_CALLS = 0
+_ORS_CALLS_LOCK = threading.Lock()
+
+
+def ors_call_total() -> int:
+    """Total ORS directions calls this process has made (thread-safe read)."""
+    return _ORS_CALLS
+
+
+def _count_ors_call():
+    global _ORS_CALLS
+    with _ORS_CALLS_LOCK:
+        _ORS_CALLS += 1
 
 
 ORS_URL = "https://api.openrouteservice.org/v2/directions/{profile}/geojson"
@@ -128,6 +149,7 @@ def _ors_directions(api_key, profile, coordinates, timeout, round_trip=None,
     if options:
         body["options"] = options
 
+    _count_ors_call()
     resp = requests.post(url, json=body, headers=headers, timeout=timeout)
     if resp.status_code == 429:                  # rate limited — back off once
         time.sleep(2.5)

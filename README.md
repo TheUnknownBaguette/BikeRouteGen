@@ -280,7 +280,14 @@ old entries.
 
 ```
 windroute/
-  engine.py       core: geocode + autocomplete, wind, route generation + shapes, scoring (no I/O)
+  engine.py       compatibility facade re-exporting the core modules below as one flat
+                  `engine.*` namespace (call sites import from here)
+  models.py       data containers (Wind, Candidate, RouteOption)
+  geometry.py     pure geometry + compass helpers
+  geocode.py      geocoding + type-ahead autocomplete
+  wind.py         wind forecast + historical wind
+  routing.py      route generation + shapes (OpenRouteService), refinement
+  scoring.py      weights, scoring, route-option selection
   planner.py      the shared planning pipeline every front-end calls (plan_routes)
   regions.py      classify the terrain archetype around a start (for --classify / classify)
   zones.py        auto-detect a quiet riding zone, by direction or nearest (for --ride-area)
@@ -294,7 +301,7 @@ webapp.py         the local/hosted web front-end (Flask)
 discord_bot.py    optional Discord front-end (thin over planner; not wired in)
 templates/        web app HTML (base, index, results, about)
 static/           web app JS (app.js) + generated maps/GPX (out/, swept hourly)
-tests/            offline unit tests (regions, weights, surface quality, providers)
+tests/            offline unit tests — run with `pytest` from the project root
 run.bat           double-click launcher for the web app (self-builds the venv)
 Procfile          production start command for a host (waitress-serve webapp:app)
 ```
@@ -302,6 +309,15 @@ Procfile          production start command for a host (waitress-serve webapp:app
 Every front-end is a thin layer over `planner` (orchestration) + `engine`/`render`
 (logic + output) — to add one, import them and call them; never reimplement the
 pipeline.
+
+---
+
+## License
+
+windroute's own source is released under the [MIT License](LICENSE) — use, fork, and
+host it freely, just keep the copyright notice. The MIT license covers this code only,
+**not** the third-party data/services below (OpenStreetMap/ODbL, Open-Meteo/CC BY 4.0,
+etc.); keep those attributions too.
 
 ---
 
