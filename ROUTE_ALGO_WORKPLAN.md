@@ -269,6 +269,17 @@ as a **hard constraint**; keep swaps that raise total score.
 
 ## Task 7 — Wind-biased edges via self-hosted router (largest, last)
 
+> **STATUS: stopgap DONE (2026-06-15); Valhalla = gated experimental seam.** Stopgap: opt-in
+> `wind` shape (`engine._make_wind_loop`) rides headwind-out to a turnaround then routes home with
+> ORS `avoid_polygons` over the outbound corridor (`engine._corridor_multipolygon`, a MultiPolygon
+> excluding the endpoints), so the tailwind return is on different roads; `_ors_directions` gained
+> `avoid_polygons`; falls back to a plain return if blocked; opt-in via `--shapes wind` (in `SHAPES`
+> + `shapes_for` always-set). Full version: `windroute/valhalla.py` — `enabled()` gated on
+> `WINDROUTE_VALHALLA_URL` (off by default → ORS only), wired into the `wind` outbound when enabled,
+> any failure falls back to ORS. UNTESTED against a live Valhalla, and true per-edge wind biasing
+> still needs a custom costing model (documented). Tests in `tests/test_wind.py`. CLI `--shapes`
+> help + web shape list updated. **Remaining work-plan item: Task 8 (region-aware tuning validation).**
+
 **Stopgap first (no new infra):** approximate wind-biased outbound on **public ORS** — route to a
 wind-optimal turnaround, then force the return onto different roads with **`avoid_polygons`** over
 the outbound corridor. Heuristic, but gets "headwind out + different roads home" today; slots into

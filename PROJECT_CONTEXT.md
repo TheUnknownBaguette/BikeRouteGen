@@ -109,6 +109,7 @@ windroute/
   zones.py        find_ride_zone: best quiet riding zone, nearest OR a forced compass direction (prefer_bearing) — for --ride-area staging
   regions.py      classify_region -> RegionProfile (terrain archetype): one Overpass read (roads + land-use) + Open-Meteo elevation (relief), cached per ~0.1° cell. classify_archetype() is pure. Diagnostic only so far (work-plan Task 1) — does NOT yet drive weights
   surface.py      OSM/Overpass surface + bike-lane + busy/path + gravel-quality source (OverpassSurface); overpass_json mirror-fallback; SurfaceProvider registry (Task 5)
+  valhalla.py     EXPERIMENTAL gated wind-biased router seam (Task 7) — off unless WINDROUTE_VALHALLA_URL set; untested against a live server
   corrections.py  personal correction cache (~/.windroute/corrections.json) + road-notes parser
   rwgps.py        Ride with GPS v1 API client (auth, list/fetch trips, trip cache, creds)
   learn.py        analyse imported trips -> rider profile + suggested weight changes (pure)
@@ -233,6 +234,26 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   the baseline so its one-time corrections aren't double-applied. Budget: adds ≤ `TOP*CALLS_EACH`
   (~10) ORS calls only when `--refine` is set. Offline tests (`test_weights.py`: improves within
   budget, length cap, skips non-refinable).
+- **Wind-biased routing** (work-plan Task 7):
+  - **`wind` shape (stopgap, DONE, opt-in `--shapes wind`):** rides headwind-OUT to a turnaround
+    (`engine._make_wind_loop`), then routes home AVOIDING the outbound corridor via ORS
+    `avoid_polygons`, so the tailwind return takes **different roads** — the strategy the owner
+    rides by hand (recovery.gpx). The corridor is `engine._corridor_multipolygon` — a MultiPolygon
+    of small squares sampled along the outbound, **excluding** boxes within a clearance of the start
+    / turnaround so the return's endpoints aren't trapped (ORS 2010). Falls back to a plain return
+    if the avoided route is unroutable. `_ors_directions` gained an `avoid_polygons` arg. Opt-in
+    (in `SHAPES` + `shapes_for`'s always-set, NOT a default), so default plans are unchanged; costs
+    2-3 ORS calls per `wind` seed. Verified offline (corridor excludes endpoints; return leg gets
+    the avoid; fallback path); the live "different roads" check needs an ORS key.
+  - **Valhalla full version (`windroute/valhalla.py`) — gated + EXPERIMENTAL, off by default.**
+    `enabled()` is True only when `WINDROUTE_VALHALLA_URL` is set; otherwise the app routes entirely
+    on ORS and none of it runs. When enabled, the `wind` shape's outbound corridor comes from
+    Valhalla (re-traced through ORS for surface/waytype extras); any failure falls back to ORS.
+    **Honest caveat:** untested against a live Valhalla (none available), and TRUE per-edge wind
+    biasing needs a **custom Valhalla costing model** — stock `bicycle` costing has no bearing-vs-
+    wind term. So this is the ready-to-wire seam, not a verified feature; the wind line still comes
+    from the turnaround geometry. (ORS `weightings.quiet` is a verified public-API no-op — why a
+    self-hosted router is needed at all.)
 - **Wind scoring:** `wind_score` rewards headwind on first half / tailwind home.
 - **Distance tolerance:** `-t/--tolerance` free buffer band; only excess is penalized.
 - **Elevation fix:** `engine._smoothed_ascent` (interpolate SRTM nodata, median +
