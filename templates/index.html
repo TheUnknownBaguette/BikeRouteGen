@@ -1,71 +1,90 @@
 {% extends "base.html" %}
 {% block content %}
-  <div class="notice">
-    <strong>Heads up:</strong> this is a hobby project, built fast with heavy AI
-    assistance (&ldquo;vibecoded&rdquo;). Routes are algorithmic suggestions and may
-    include busy or unsafe roads, wrong turns, or errors &mdash; <strong>always check a
-    route and current conditions before you ride. You ride at your own risk.</strong>
-    No warranty. <a href="{{ url_for('about') }}">About, privacy &amp; disclaimer →</a>
+  <div class="heads">
+    <span class="ic" aria-hidden="true">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+    </span>
+    <span>Routes are algorithmic suggestions from imperfect data &mdash; always check the route and
+      current conditions before you ride. You ride at your own risk; no warranty.
+      <a href="{{ url_for('about') }}">About &amp; safety&nbsp;&rarr;</a></span>
   </div>
-  {% if error %}<div class="err">Couldn't plan that one: {{ error }}</div>{% endif %}
+
+  {% if error %}<div class="err">Couldn&rsquo;t plan that one: {{ error }}</div>{% endif %}
+
   <form class="card" method="post" action="/plan" id="planform">
-    <div class="row">
-      <div style="flex:2">
-        <label for="location">Start point</label>
-        <div class="ac">
-          <input type="text" id="location" name="location" value="{{ d.location }}"
-                 placeholder="Chicago, IL · an address · or lat,lng"
-                 autocomplete="off" spellcheck="false">
-          <input type="hidden" name="picked_lat" id="picked_lat">
-          <input type="hidden" name="picked_lng" id="picked_lng">
-          <input type="hidden" name="picked_label" id="picked_label">
-        </div>
-      </div>
-      <div>
-        <label for="distance">Distance</label>
-        <input type="number" id="distance" name="distance" value="{{ d.distance }}"
-               step="any" min="1">
-      </div>
-      <div style="max-width:110px">
-        <label for="unit">Unit</label>
-        <select id="unit" name="unit">
-          <option value="mi" {{ 'selected' if d.unit=='mi' }}>mi</option>
-          <option value="km" {{ 'selected' if d.unit=='km' }}>km</option>
-        </select>
+    <div class="field">
+      <label for="location">Where are you starting?</label>
+      <div class="ac field-ic">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6-7-11a7 7 0 0 1 14 0c0 5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+        <input type="text" id="location" name="location" value="{{ d.location }}"
+               placeholder="a town, an address, or lat,lng" autocomplete="off" spellcheck="false">
+        <input type="hidden" name="picked_lat" id="picked_lat">
+        <input type="hidden" name="picked_lng" id="picked_lng">
+        <input type="hidden" name="picked_label" id="picked_label">
       </div>
     </div>
-    <div class="row">
-      <div>
-        <label for="start">Start time</label>
-        <input type="datetime-local" id="start" name="start"
-               value="{{ d.start if 'T' in d.start else '' }}">
-        <button type="button" id="nowbtn" class="linklike">Set to now</button>
+
+    <div class="grid">
+      <div class="field" style="margin-bottom:0">
+        <label for="distance">How far?</label>
+        <div style="display:flex; gap:10px; align-items:center">
+          <input type="number" id="distance" name="distance" value="{{ d.distance }}"
+                 step="any" min="1" style="flex:1; min-width:0">
+          <div class="seg" role="group" aria-label="Distance unit">
+            <label class="seg-opt"><input type="radio" name="unit" value="mi" {{ 'checked' if d.unit!='km' }}><span>mi</span></label>
+            <label class="seg-opt"><input type="radio" name="unit" value="km" {{ 'checked' if d.unit=='km' }}><span>km</span></label>
+          </div>
+        </div>
+        <div class="chips">
+          <button type="button" class="chip" data-dist="15">15</button>
+          <button type="button" class="chip" data-dist="25">25</button>
+          <button type="button" class="chip" data-dist="40">40</button>
+          <button type="button" class="chip" data-dist="60">60</button>
+        </div>
       </div>
-      <div style="max-width:160px">
-        <label for="ride_type">Ride type
-          <span class="help left" tabindex="0"
+
+      <div class="field" style="margin-bottom:0">
+        <label>Ride type
+          <span class="help" tabindex="0"
                 aria-label="Road avoids gravel and prefers paved roads and bike lanes. Gravel seeks out unpaved roads instead."
                 data-tip="Road avoids gravel and prefers paved roads and bike lanes. Gravel seeks out unpaved roads instead.">i</span></label>
-        <select id="ride_type" name="ride_type">
-          <option value="road" {{ 'selected' if d.ride_type=='road' }}>road</option>
-          <option value="gravel" {{ 'selected' if d.ride_type=='gravel' }}>gravel</option>
-        </select>
+        <div class="seg" role="group" aria-label="Ride type">
+          <label class="seg-opt"><input type="radio" name="ride_type" value="road" {{ 'checked' if d.ride_type!='gravel' }}>
+            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="17" r="3.2"/><circle cx="18" cy="17" r="3.2"/><path d="M6 17l4-8h5M9.5 9l3 8M14.5 9l1.5-3h2.5"/></svg> Road</span></label>
+          <label class="seg-opt"><input type="radio" name="ride_type" value="gravel" {{ 'checked' if d.ride_type=='gravel' }}>
+            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20h18L14.5 7l-3 5-2-2.5z"/></svg> Gravel</span></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="field" style="margin:18px 0 0">
+      <label for="start">When are you riding?</label>
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+        <input type="datetime-local" id="start" name="start"
+               value="{{ d.start if 'T' in d.start else '' }}" style="flex:1; min-width:180px">
+        <button type="button" id="nowbtn" class="chip">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Now</button>
       </div>
     </div>
 
     <details>
-      <summary>Advanced options</summary>
-      <div>
+      <summary>
+        <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        Advanced options
+      </summary>
+
+      <div class="field">
         <label>Route shapes</label>
-        <div class="checks">
+        <div class="togs">
           {% for s in all_shapes %}
-            <label><input type="checkbox" name="shapes" value="{{ s }}"
-              {{ 'checked' if s in d.shapes }}> {{ s }}</label>
+            <label class="tog"><input type="checkbox" name="shapes" value="{{ s }}"
+              {{ 'checked' if s in d.shapes }}><span>{{ s }}</span></label>
           {% endfor %}
         </div>
       </div>
-      <div class="row" style="margin-top:14px">
-        <div>
+
+      <div class="grid">
+        <div class="field" style="margin-bottom:0">
           <label for="surface_source">Surface data
             <span class="help" tabindex="0"
                   aria-label="Where road-surface data comes from. ors is the fast default; osm reads finer OpenStreetMap tags and on-road bike lanes; both cross-checks them and flags disagreements."
@@ -76,51 +95,50 @@
             {% endfor %}
           </select>
         </div>
-        <div>
+        <div class="field" style="margin-bottom:0">
           <label for="ride_area">Ride-area staging
             <span class="help" tabindex="0"
                   aria-label="Optionally ride somewhere quieter first. Blank starts right here; auto finds the nearest quiet countryside; a direction like south heads that way; or name a place to aim for."
                   data-tip="Optionally ride somewhere quieter first. Blank starts right here; auto finds the nearest quiet countryside; a direction like south heads that way; or name a place to aim for.">i</span></label>
           <input type="text" id="ride_area" name="ride_area" value="{{ d.ride_area }}"
-                 placeholder="blank · auto · a direction (S, SE) · a place">
+                 placeholder="blank · auto · S, SE · a place">
         </div>
-        <div style="max-width:130px">
-          <label for="tolerance">Tolerance
-            <span class="help left" tabindex="0"
+      </div>
+
+      <div class="grid" style="margin-top:18px">
+        <div class="field" style="margin-bottom:0">
+          <label for="tolerance">Distance tolerance
+            <span class="help" tabindex="0"
                   aria-label="How far over or under your target distance is OK with no penalty, in your chosen unit. Routes within this band are not docked for length."
                   data-tip="How far over or under your target distance is OK with no penalty, in your chosen unit. Routes within this band are not docked for length.">i</span></label>
-          <input type="number" id="tolerance" name="tolerance" value="{{ d.tolerance }}"
-                 step="any" min="0">
+          <input type="number" id="tolerance" name="tolerance" value="{{ d.tolerance }}" step="any" min="0">
         </div>
-        <div style="max-width:130px">
-          <label for="candidates">Candidates
-            <span class="help left" tabindex="0"
+        <div class="field" style="margin-bottom:0">
+          <label for="candidates">Candidates to compare
+            <span class="help" tabindex="0"
                   aria-label="How many routes to generate and compare. More improves the odds of a good match but is slower and uses more API calls."
                   data-tip="How many routes to generate and compare. More improves the odds of a good match but is slower and uses more API calls.">i</span></label>
-          <input type="number" id="candidates" name="candidates" value="{{ d.candidates }}"
-                 min="1" max="20">
+          <input type="number" id="candidates" name="candidates" value="{{ d.candidates }}" min="1" max="20">
         </div>
       </div>
-      <div class="checks" style="margin-top:6px">
-        <label><input type="checkbox" name="corrections"
-          {{ 'checked' if d.corrections }}> Apply my road notes (corrections)</label>
-      </div>
-      <div class="checks" style="margin-top:6px">
-        <label><input type="checkbox" name="classify"
-          {{ 'checked' if d.classify }}> Adapt tuning to the local terrain
-          (mountains, suburbs, coast …)</label>
-      </div>
-      <div class="checks" style="margin-top:6px">
-        <label><input type="checkbox" name="refine"
-          {{ 'checked' if d.refine }}> Refine the top routes (nudge + re-route for a
-          better score; a little slower)</label>
+
+      <div class="checks" style="margin-top:18px">
+        <label><input type="checkbox" name="corrections" {{ 'checked' if d.corrections }}>
+          Apply my road notes (corrections)</label>
+        <label><input type="checkbox" name="classify" {{ 'checked' if d.classify }}>
+          Adapt tuning to the local terrain (mountains, suburbs, coast …)</label>
+        <label><input type="checkbox" name="refine" {{ 'checked' if d.refine }}>
+          Refine the top routes (nudge + re-route for a better score; a little slower)</label>
       </div>
     </details>
 
-    <div style="margin-top:18px">
-      <button type="submit" id="go">Plan my routes</button>
-      <span id="working" class="muted" style="display:none; margin-left:12px">
-        Generating… this takes ~20–40s (talking to the routing + wind services).</span>
+    <div style="margin-top:22px; display:flex; align-items:center; gap:14px; flex-wrap:wrap">
+      <button type="submit" id="go" class="go">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="2.4"/><circle cx="18" cy="5" r="2.4"/><path d="M8.4 19H14a4 4 0 0 0 0-8h-4a4 4 0 0 1 0-8h5.6"/></svg>
+        Plan my rides
+      </button>
+      <span id="working" class="muted" style="display:none; font-size:14px">
+        Finding your routes… ~20–40s (talking to the routing &amp; wind services).</span>
     </div>
   </form>
 

@@ -1,12 +1,26 @@
 {% extends "base.html" %}
 {% block title %}windroute — {{ label }}{% endblock %}
-{% block sub %}{{ label }} · {{ wind.when }}{% endblock %}
+{% block sub %}Routes for {{ label }} · {{ wind.when }}{% endblock %}
 {% block content %}
-  <div class="card" style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap">
-    <div>
-      <strong>Wind from {{ wind.from }}</strong> ({{ '%.0f'|format(wind.deg) }}°)
-      at {{ '%.0f'|format(wind.mph) }} mph, gusting {{ '%.0f'|format(wind.gust) }}.
-      <div class="muted" style="font-size:14px">Ride out toward {{ wind.from }} to take the headwind while fresh.</div>
+
+  <div class="card wind-card">
+    <span class="compass" aria-hidden="true">
+      <svg width="60" height="60" viewBox="0 0 60 60">
+        <circle cx="30" cy="30" r="26" fill="#f1f5fc" stroke="#d7dfea"/>
+        <g stroke="#c2cddd" stroke-width="1.5" stroke-linecap="round">
+          <path d="M30 6v4M30 50v4M6 30h4M50 30h4"/>
+        </g>
+        <g transform="rotate({{ wind.deg }} 30 30)">
+          <line x1="30" y1="11" x2="30" y2="29" stroke="#2563eb" stroke-width="3" stroke-linecap="round"/>
+          <path d="M30 33 l-5 -8 h10 z" fill="#1d4ed8"/>
+        </g>
+      </svg>
+    </span>
+    <div style="flex:1; min-width:0">
+      <div style="font-weight:700; font-size:16.5px">Wind from {{ wind.from }} · {{ '%.0f'|format(wind.mph) }} mph
+        <span class="muted" style="font-weight:500">(gusts {{ '%.0f'|format(wind.gust) }})</span></div>
+      <div class="muted" style="font-size:14px">Head out toward {{ wind.from }} into the headwind while you’re
+        fresh — sail home with the tailwind.</div>
     </div>
     <a class="back" href="/">← Plan another</a>
   </div>
@@ -18,45 +32,76 @@
   {% endif %}
 
   {% for c in cards %}
-    <div class="card opt">
-      <h3>
-        {% if c.role == 'recommended' %}<span class="badge rec">RECOMMENDED</span>
-        {% else %}<span class="badge alt">OPTION {{ loop.index }}</span>{% endif %}
-        &nbsp;{{ c.headline }}
-      </h3>
-      <img src="{{ url_for('static', filename=c.png) }}" alt="route map">
-      <div class="meta">
-        {{ '%.1f'|format(c.dist_mi) }} mi ({{ '%.1f'|format(c.dist_km) }} km)
-        · +{{ '%.0f'|format(c.ascent_m) }} m · {{ c.verdict }}
-        · {{ c.shape }}{% if c.cross > 2 %} · <span style="color:var(--warn)">{{ c.cross }} self-crossings</span>{% endif %}
+    {% if c.role == 'recommended' %}
+      <div class="card opt rec">
+        <h3><span class="badge rec">Recommended</span> {{ c.headline }}</h3>
+        <img src="{{ url_for('static', filename=c.png) }}" alt="map of the recommended route">
+        <div class="stats">
+          <span class="stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 12l4-4M3 12l4 4M21 12l-4-4M21 12l-4 4"/></svg>{{ '%.1f'|format(c.dist_mi) }} mi · {{ '%.0f'|format(c.dist_km) }} km</span>
+          <span class="stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18l6-8 4 5 3-4 5 7z"/></svg>+{{ '%.0f'|format(c.ascent_m) }} m</span>
+          <span class="stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h12a3 3 0 1 0-3-3M3 14h17a3 3 0 1 1-3 3"/></svg>{{ c.verdict }}</span>
+          {% if c.gravel_pct >= 1 %}<span class="stat">{{ '%.0f'|format(c.gravel_pct) }}% gravel</span>{% endif %}
+          {% if c.unrideable_pct > 0 %}<span class="stat warn">{{ '%.0f'|format(c.unrideable_pct) }}% unrideable</span>{% endif %}
+          {% if c.lane_pct >= 1 %}<span class="stat">{{ '%.0f'|format(c.lane_pct) }}% bike lane</span>{% endif %}
+        </div>
+        <ul>{% for r in c.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+        <a class="dl" href="{{ url_for('download', name=c.gpx) }}" download="{{ c.dlname }}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Download GPX</a>
       </div>
-      <ul>{% for r in c.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
-      <a class="dl" href="{{ url_for('download', name=c.gpx) }}" download="{{ c.dlname }}">⬇ Download GPX</a>
-    </div>
+    {% endif %}
   {% endfor %}
 
-  <div class="card">
-    <strong>All candidates (ranked)</strong>
-    <table style="margin-top:10px">
-      <thead><tr>
-        <th>#</th><th>Shape</th><th>Wind</th><th>mi</th><th>km</th><th>Climb</th>
-        <th>Gravel%</th><th>Hwy%</th><th>Path%</th><th>Cross</th><th>Score</th>
-      </tr></thead>
-      <tbody>
-      {% for c in ranked %}
-        <tr>
-          <td>{{ loop.index }}</td><td>{{ c.shape }}</td><td class="muted">{{ c.verdict }}</td>
-          <td>{{ '%.1f'|format(c.dist_mi) }}</td><td>{{ '%.1f'|format(c.dist_km) }}</td>
-          <td>{{ '%.0f'|format(c.ascent_m) }}</td>
-          <td>{{ '%.0f'|format(c.gravel_pct) }}{% if c.unrideable_pct > 0 %} <span style="color:var(--warn)" title="unrideable surface">!{{ '%.0f'|format(c.unrideable_pct) }}</span>{% endif %}</td><td>{{ '%.0f'|format(c.hwy_pct) }}</td>
-          <td>{{ '%.0f'|format(c.path_pct) }}</td><td>{{ c.cross }}</td>
-          <td>{{ '%.2f'|format(c.score) }}</td>
-        </tr>
+  {% set alts = cards | selectattr('role', 'ne', 'recommended') | list %}
+  {% if alts %}
+    <div class="section-title" style="margin:2px 0 12px">Other options</div>
+    <div class="optgrid">
+      {% for c in alts %}
+        <div class="card opt" style="margin:0">
+          <h3 style="font-size:16px"><span class="badge alt">Option {{ loop.index }}</span> {{ c.headline }}</h3>
+          <div class="alt-map"><img src="{{ url_for('static', filename=c.png) }}" alt="map of an alternative route"></div>
+          <div class="stats">
+            <span class="stat">{{ '%.1f'|format(c.dist_mi) }} mi</span>
+            <span class="stat">+{{ '%.0f'|format(c.ascent_m) }} m</span>
+            <span class="stat">{{ c.shape }}</span>
+            {% if c.unrideable_pct > 0 %}<span class="stat warn">{{ '%.0f'|format(c.unrideable_pct) }}% unrideable</span>{% endif %}
+          </div>
+          <ul>{% for r in c.reasons[:2] %}<li>{{ r }}</li>{% endfor %}</ul>
+          <a class="dl ghost" href="{{ url_for('download', name=c.gpx) }}" download="{{ c.dlname }}">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            GPX</a>
+        </div>
       {% endfor %}
-      </tbody>
-    </table>
-    <div class="muted" style="font-size:12px; margin-top:8px">
-      The three cards above are the picks (recommendation + two alternatives) chosen
-      from these. Re-run with more candidates from the form for a wider search.</div>
-  </div>
+    </div>
+  {% endif %}
+
+  <details class="card" style="padding:0">
+    <summary style="padding:16px 20px">
+      <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+      All {{ ranked|length }} candidates &amp; stats
+    </summary>
+    <div style="padding:0 20px 18px; overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>#</th><th>Shape</th><th>Wind</th><th>mi</th><th>km</th><th>Climb</th>
+          <th>Gravel%</th><th>Hwy%</th><th>Path%</th><th>Cross</th><th>Score</th>
+        </tr></thead>
+        <tbody>
+        {% for c in ranked %}
+          <tr>
+            <td>{{ loop.index }}</td><td>{{ c.shape }}</td><td class="muted">{{ c.verdict }}</td>
+            <td>{{ '%.1f'|format(c.dist_mi) }}</td><td>{{ '%.1f'|format(c.dist_km) }}</td>
+            <td>{{ '%.0f'|format(c.ascent_m) }}</td>
+            <td>{{ '%.0f'|format(c.gravel_pct) }}{% if c.unrideable_pct > 0 %} <span style="color:var(--warn)" title="unrideable surface">!{{ '%.0f'|format(c.unrideable_pct) }}</span>{% endif %}</td>
+            <td>{{ '%.0f'|format(c.hwy_pct) }}</td><td>{{ '%.0f'|format(c.path_pct) }}</td>
+            <td>{{ c.cross }}</td><td>{{ '%.2f'|format(c.score) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <div class="muted" style="font-size:12px; margin-top:10px">The cards above are picked from these
+        — re-run with more candidates from the form for a wider search.</div>
+    </div>
+  </details>
+
 {% endblock %}

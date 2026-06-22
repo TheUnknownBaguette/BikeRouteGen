@@ -28,6 +28,18 @@
   if (btn) btn.addEventListener('click', function () { start.value = localNowHour(); });
 })();
 
+// Distance quick-pick chips: clicking one fills the distance field.
+(function () {
+  var dist = document.getElementById('distance');
+  if (!dist) return;
+  document.querySelectorAll('.chip[data-dist]').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      dist.value = chip.getAttribute('data-dist');
+      dist.focus();
+    });
+  });
+})();
+
 // Location field: debounced type-ahead suggestions from the same-origin /suggest
 // proxy, with mouse + keyboard selection.
 (function () {
