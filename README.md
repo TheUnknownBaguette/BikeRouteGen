@@ -287,7 +287,7 @@ windroute/
   surface.py      OpenStreetMap/Overpass surface + bike-lane + gravel-quality source; provider registry
   corrections.py  the personal "I rode this" correction cache + road-notes parser
   rwgps.py        Ride with GPS API client (for the `learn` command's trip history)
-  learn.py        analyse imported trips -> rider profile + suggested weight changes
+  learn.py        analyse imported trips -> rider profile + per-region clusters + suggested weight changes
   render.py       map image + GPX output
   cli.py          the CLI wrapper (typer + rich)
 webapp.py         the local/hosted web front-end (Flask)

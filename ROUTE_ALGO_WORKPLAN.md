@@ -44,6 +44,13 @@ This supersedes any earlier free-form "improvement notes." If both are present, 
 
 ## Task sequence
 
+> **ALL TASKS COMPLETE (1–8, 2026-06-15).** Each task's section below carries a STATUS line with
+> what shipped + where. Adaptivity (Tasks 1–2, 4) and the `wind`/`refine` extras (6–7) are opt-in
+> behind `--classify` / `--shapes` / `--refine` so the validated grid-farmland ROAD default stays
+> byte-identical; non-grid + gravel rows are conservative first passes to calibrate against more
+> rides (this is what Task 8's per-region report + mismatch warning support). The Valhalla path
+> (Task 7) is a gated, experimental seam (off by default). See PROJECT_CONTEXT "Features built".
+
 | # | Task | Why now | Primary files |
 |---|------|---------|---------------|
 | 1 | Region archetype classifier | Foundation — everything else keys off it | `zones.py` (or new `regions.py`), `planner.py` |
@@ -298,6 +305,15 @@ custom weights — that's why this needs a self-hosted router.
 ---
 
 ## Task 8 — Region-aware tuning validation
+
+> **STATUS: DONE (2026-06-15), analysis + review only.** `learn.cluster_trips`/`cluster_profiles`
+> cluster the history geographically (greedy, by trip `start`, `CLUSTER_RADIUS_KM`=30); the CLI
+> `learn` prints a per-region table and classifies each centroid (`regions.classify_region`; skipped
+> under `--no-surface`), saving the dominant region's archetype to `~/.windroute/region_profile.json`
+> (`save_training_region`/`load_training_region`). `plan_routes` (when `--classify`) appends
+> `learn.region_mismatch_note(...)` if the start's archetype differs from the saved training one. No
+> auto-retune. `trip_features` now records each trip's `start`. Tests in
+> `tests/test_learn_regions.py`. **This was the last work-plan task — Tasks 1–8 complete.**
 
 **Goal:** trust the weights when the rider leaves the home region. Keep **analysis + review**
 (owner deliberately deferred auto-retune — do not auto-apply weight changes).

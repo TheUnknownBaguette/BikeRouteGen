@@ -16,6 +16,8 @@ Pipeline (the CLI drives the network parts so it can show progress):
 from __future__ import annotations
 
 import datetime as dt
+import json
+from pathlib import Path
 
 from . import engine
 from .surface import _haversine_km
@@ -131,6 +133,7 @@ def trip_features(coords, departed_at=None, surf=None, do_wind=True,
     feat = {
         "distance_km": dist_km,
         "distance_mi": dist_km / KM_PER_MILE,
+        "start": (coords[0][0], coords[0][1]),    # for geographic clustering (Task 8)
         "outbound_bearing": bearing,
         "sector": engine.compass_label(bearing),
         "self_overlap": overlap,
@@ -331,3 +334,87 @@ def suggest_weight_changes(profile: dict) -> list[str]:
                    f"into the wind regardless — this is the case for the "
                    f"preferred-direction bias noted in PROJECT_CONTEXT.md.")
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Region-aware tuning validation (work-plan Task 8) — analysis + review only
+# --------------------------------------------------------------------------- #
+# The weights are tuned from rides in one place. These helpers cluster the trip
+# history geographically so the report can show a per-region profile, and let the
+# planner warn when a plan's terrain differs from where the training rides came
+# from. Nothing here changes any weight — the rider reviews and decides.
+CLUSTER_RADIUS_KM = 30.0
+REGION_PROFILE_PATH = Path.home() / ".windroute" / "region_profile.json"
+
+
+def cluster_trips(feats, radius_km=CLUSTER_RADIUS_KM):
+    """Greedy geographic clustering of trips by start point (pure, no network).
+
+    Each trip joins the first existing cluster whose running-mean center is within
+    `radius_km`, else seeds a new one. Returns a list of
+    ``{"center": (lat,lng), "feats": [...], "n": int}``, most trips first.
+    """
+    clusters: list = []
+    for f in feats:
+        s = f.get("start")
+        if not s:
+            continue
+        for c in clusters:
+            if _haversine_km(s, c["center"]) <= radius_km:
+                c["feats"].append(f)
+                k = len(c["feats"])                       # running-mean recenter
+                c["center"] = (c["center"][0] + (s[0] - c["center"][0]) / k,
+                               c["center"][1] + (s[1] - c["center"][1]) / k)
+                break
+        else:
+            clusters.append({"center": s, "feats": [f]})
+    for c in clusters:
+        c["n"] = len(c["feats"])
+    clusters.sort(key=lambda c: -c["n"])
+    return clusters
+
+
+def cluster_profiles(feats, radius_km=CLUSTER_RADIUS_KM):
+    """Per-cluster rider profile (pure): ``[{center, n, profile}]``, most trips first."""
+    return [{"center": c["center"], "n": c["n"], "profile": analyze_trips(c["feats"])}
+            for c in cluster_trips(feats, radius_km)]
+
+
+def region_mismatch_note(trained_archetype, start_archetype):
+    """One-line warning when a plan's terrain differs from the training rides' (or None).
+
+    Pure. No warning when either archetype is missing/`unknown` or they match.
+    """
+    if not trained_archetype or not start_archetype:
+        return None
+    if "unknown" in (trained_archetype, start_archetype):
+        return None
+    if trained_archetype == start_archetype:
+        return None
+    return (f"heads-up: your weights are tuned from rides in {trained_archetype} country, "
+            f"but this start looks like {start_archetype} — results may be off "
+            f"(no weights were changed).")
+
+
+def save_training_region(archetype, center, n_trips, clusters=None, path=None):
+    """Persist the dominant training region so `plan --classify` can warn on mismatch."""
+    p = Path(path) if path else REGION_PROFILE_PATH
+    p.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "training_archetype": archetype,
+        "center": list(center) if center else None,
+        "n_trips": n_trips,
+        "clusters": clusters or [],
+        "saved": dt.datetime.now().isoformat(timespec="seconds"),
+    }
+    p.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return p
+
+
+def load_training_region(path=None):
+    """Load the saved training-region profile, or None if absent/unreadable."""
+    p = Path(path) if path else REGION_PROFILE_PATH
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None

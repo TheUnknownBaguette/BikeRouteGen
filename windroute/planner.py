@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from dateutil import parser as dateparser
 
-from . import engine, surface, zones, regions
+from . import engine, surface, zones, regions, learn
 from .corrections import CorrectionCache
 
 SURFACE_DISAGREE = 0.10   # |ORS unpaved - OSM unpaved| above this -> flag a route
@@ -88,6 +88,16 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
     if archetype and archetype not in ("grid-farmland", "unknown"):
         notes.append(f"terrain: tuning for {archetype} "
                      f"(shapes: {', '.join(shape_list)})")
+
+    # Region-aware tuning validation (Task 8): if the trip history `learn` analysed
+    # came from a different terrain than this start, warn — the weights may be off
+    # here. Analysis + review only: nothing is retuned automatically.
+    if region is not None:
+        trained = learn.load_training_region()
+        mismatch = learn.region_mismatch_note(
+            (trained or {}).get("training_archetype"), archetype)
+        if mismatch:
+            notes.append(mismatch)
 
     zone = None
     if ride_area:

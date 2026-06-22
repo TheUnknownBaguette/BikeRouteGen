@@ -112,7 +112,7 @@ windroute/
   valhalla.py     EXPERIMENTAL gated wind-biased router seam (Task 7) — off unless WINDROUTE_VALHALLA_URL set; untested against a live server
   corrections.py  personal correction cache (~/.windroute/corrections.json) + road-notes parser
   rwgps.py        Ride with GPS v1 API client (auth, list/fetch trips, trip cache, creds)
-  learn.py        analyse imported trips -> rider profile + suggested weight changes (pure)
+  learn.py        analyse imported trips -> rider profile + suggested weight changes (pure); geographic clustering + region_mismatch_note + save/load training-region archetype (Task 8)
   render.py       map image + GPX output
   cli.py          CLI front-end: plan / classify / mark / roads-import / corrections / forget / rwgps-login / import / learn
 webapp.py         local/hosted web front-end (Flask): routes / /plan /suggest /about; headers + rate limit
@@ -254,6 +254,18 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
     wind term. So this is the ready-to-wire seam, not a verified feature; the wind line still comes
     from the turnaround geometry. (ORS `weightings.quiet` is a verified public-API no-op — why a
     self-hosted router is needed at all.)
+- **Region-aware tuning validation** (work-plan Task 8 — DONE, analysis + review only):
+  `learn` now clusters the trip history geographically (`learn.cluster_trips` /
+  `cluster_profiles`, pure greedy clustering by trip start within `CLUSTER_RADIUS_KM`=30) and the
+  CLI prints a per-region table (center, trips, archetype, median distance, top directions),
+  classifying each cluster's centroid via `regions.classify_region` (network; skipped under
+  `--no-surface`). It saves the dominant region's archetype to `~/.windroute/region_profile.json`
+  (`learn.save_training_region` / `load_training_region`). At plan time, when `--classify` is on,
+  `plan_routes` compares the start's archetype to that saved training archetype and, if they differ,
+  appends a one-line note (`learn.region_mismatch_note`): "weights tuned from rides in {X} country,
+  but this start looks like {Y} — results may be off." **No weights change automatically** (the
+  owner deliberately chose analysis + review over auto-retune). `trip_features` now also records each
+  trip's `start` coord (for clustering). Offline tests in `tests/test_learn_regions.py`.
 - **Wind scoring:** `wind_score` rewards headwind on first half / tailwind home.
 - **Distance tolerance:** `-t/--tolerance` free buffer band; only excess is penalized.
 - **Elevation fix:** `engine._smoothed_ascent` (interpolate SRTM nodata, median +

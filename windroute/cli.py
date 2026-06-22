@@ -19,7 +19,7 @@ from rich.progress import Progress
 from rich.table import Table
 from rich.text import Text
 
-from . import engine, render, surface, rwgps, learn, planner
+from . import engine, render, surface, rwgps, learn, planner, regions
 from .planner import SURFACE_DISAGREE
 from .corrections import (CorrectionCache, parse_gpx, downsample,
                           parse_road_notes, ROAD_NOTES_TEMPLATE)
@@ -581,6 +581,33 @@ def learn_cmd(
     for line in learn.suggest_weight_changes(profile):
         console.print(f"  • {line}")
 
+    # Region-aware view (Task 8): cluster rides geographically; classify each region
+    # (network) and remember the home archetype so 'plan --classify' can warn when you
+    # ride somewhere the weights weren't tuned for. --no-surface skips the network bit.
+    clusters = learn.cluster_profiles(feats)
+    if clusters:
+        if no_surface:
+            _print_clusters([{**c, "archetype": None} for c in clusters])
+            console.print("[dim]Run without --no-surface to classify regions + save the "
+                          "home archetype for plan-time mismatch warnings.[/]")
+        else:
+            labeled = []
+            with console.status("[cyan]Classifying ride regions…"):
+                for c in clusters:
+                    try:
+                        arch = regions.classify_region(tuple(c["center"])).archetype
+                    except Exception:
+                        arch = "unknown"
+                    labeled.append({**c, "archetype": arch})
+            _print_clusters(labeled)
+            dom = labeled[0]
+            learn.save_training_region(
+                dom["archetype"], dom["center"], dom["n"],
+                clusters=[{"archetype": x["archetype"], "center": list(x["center"]),
+                           "n": x["n"]} for x in labeled])
+            console.print(f"[dim]Home region saved as [bold]{dom['archetype']}[/] — "
+                          f"plan --classify will flag rides in other terrain.[/]")
+
     if save_json:
         path = Path.home() / ".windroute" / "trip_analysis.json"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -649,6 +676,25 @@ def _print_profile(p):
     if p.get("dominant_sectors"):
         console.print(f"[dim]Favourite directions: "
                       f"{', '.join(p['dominant_sectors'])}[/]")
+
+
+def _print_clusters(clusters):
+    """Per-region (geographic cluster) summary table for `learn` (Task 8)."""
+    t = Table(title="Where you ride (geographic clusters)", header_style="bold")
+    t.add_column("#", justify="right")
+    t.add_column("Center")
+    t.add_column("Trips", justify="right")
+    t.add_column("Archetype")
+    t.add_column("Median mi", justify="right")
+    t.add_column("Top dirs")
+    for i, c in enumerate(clusters, 1):
+        p = c["profile"]
+        d = p.get("distance_mi") or {}
+        doms = ", ".join((p.get("dominant_sectors") or [])[:3])
+        t.add_row(str(i), f"{c['center'][0]:.2f}, {c['center'][1]:.2f}", str(c["n"]),
+                  c.get("archetype") or "[dim]—[/]",
+                  f"{d.get('median', 0):.0f}" if d else "-", doms or "[dim]—[/]")
+    console.print(t)
 
 
 def _parse_latlng(s: str):
