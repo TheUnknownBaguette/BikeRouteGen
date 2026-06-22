@@ -372,6 +372,13 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
 
 ## Key decisions & gotchas (the non-obvious stuff — read before changing these)
 
+- **`generate_candidates` runs the candidate ORS calls CONCURRENTLY** (bounded
+  `ThreadPoolExecutor`, `engine.ORS_MAX_WORKERS=6`; CODE_HEALTH Task A2). Per-shape
+  seed indices are assigned before dispatch and results are slotted back into plan
+  order, so the result set + tie-break ordering match the old serial path exactly —
+  only latency changed. `workers=1` = serial (debugging). The per-call 429 back-off
+  in `_ors_directions` still applies; the old `sleep` arg is now a no-op. Keep new
+  per-candidate builders thread-safe (no shared mutable state) if you add shapes.
 - **ORS `profile_params.weightings.quiet` is a NO-OP on the public API** (accepted,
   silently ignored — verified byte-identical routes). All "quiet" steering is done via
   the scoring penalty, never at the routing level.

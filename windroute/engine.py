@@ -1,6 +1,7 @@
 """Core logic. No printing, no I/O beyond HTTP — pure functions a front-end calls."""
 from __future__ import annotations
 
+import concurrent.futures
 import math
 import re
 import time
@@ -1071,10 +1072,13 @@ def refine_candidate(cand, api_key, profile, target_km, tolerance_km, score_fn,
     return best, calls
 
 
+ORS_MAX_WORKERS = 6   # candidate ORS calls in flight at once (free tier ~40 req/min)
+
+
 def generate_candidates(lat, lng, target_km, ride_type, api_key,
                         n=8, points=5, timeout=40, sleep=0.4,
                         shapes=("loop",), into_wind_bearing=None, zone=None,
-                        loop_geom=None):
+                        loop_geom=None, workers=ORS_MAX_WORKERS):
     """Generate `n` candidate routes of ~target_km from (lat, lng).
 
     `shapes` chooses which route forms to produce ("loop", "out-and-back",
@@ -1090,6 +1094,14 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
     `loop_geom` is an optional (loop_sides_tuple, detour) pair from
     `loop_geom_for(archetype)` controlling the polygon-loop shape (more sides + a
     bigger detour for curvy terrain). None -> today's grid-farmland geometry.
+
+    `workers` bounds how many candidate ORS calls run concurrently (each candidate
+    is an independent round-trip). The default turns ~12 sequential calls into a few
+    batches — the bulk of the per-plan latency — while staying inside the free-tier
+    burst; the per-call 429 back-off in `_ors_directions` still applies. `workers=1`
+    reproduces the old fully-serial behavior for debugging. `sleep` is retained for
+    backward compatibility but is no longer used (concurrency replaces the manual
+    inter-call pacing).
     """
     if target_km > 100:
         raise ValueError("OpenRouteService caps round trips at 100 km. Shorten the ride.")
@@ -1112,47 +1124,64 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
         i += 1
 
     center = into_wind_bearing if into_wind_bearing is not None else 0.0
-    out, seeds = [], {s: 0 for s in SHAPES}
     loop_sides, loop_detour = loop_geom or (_LOOP_SIDES, 1.25)
 
+    # Assign each plan entry its per-shape seed index up front, exactly as the serial
+    # version did, so the concurrent builds are deterministic and the result order
+    # doesn't depend on which future finishes first.
+    seeds = {s: 0 for s in SHAPES}
+    specs = []                                    # [(shape, idx), ...] in plan order
     for shape in plan:
-        idx = seeds[shape]
-        bearing = (center + _BEARING_OFFSETS[idx % len(_BEARING_OFFSETS)]) % 360
-        try:
-            if shape == "loop":
-                # Clean geometric polygon loop; vary sides + travel direction by seed.
-                c = _make_polygon_loop(
-                    api_key, profile, lat, lng, target_km, bearing, timeout,
-                    n_sides=loop_sides[idx % len(loop_sides)],
-                    orient=(1 if (idx // len(loop_sides)) % 2 == 0 else -1),
-                    detour=loop_detour)
-            elif shape == "roundtrip":
-                c = _make_roundtrip(api_key, profile, lat, lng, target_km, points, idx, timeout)
-            elif shape == "out-and-back":
-                c = _make_out_back(api_key, profile, lat, lng, target_km, bearing, timeout)
-            elif shape == "rectangle":
-                c = _make_rectangle(api_key, profile, lat, lng, target_km, bearing, timeout,
-                                    cross_sign=(1 if idx % 2 == 0 else -1))
-            elif shape == "staging":
-                c = _make_staging(api_key, profile, lat, lng, target_km, zone,
-                                  idx, timeout, loop_sides=loop_sides,
-                                  loop_detour=loop_detour)
-            elif shape == "wind":
-                # Aim at the TRUE into-wind bearing (not the off-wind offsets) — the
-                # whole point is headwind out, tailwind home on different roads.
-                c = _make_wind_loop(
-                    api_key, profile, lat, lng, target_km,
-                    into_wind_bearing if into_wind_bearing is not None else 0.0,
-                    timeout, seed=idx)
-            else:  # lollipop
-                c = _make_lollipop(api_key, profile, lat, lng, target_km, bearing,
-                                   idx, timeout, loop_sides=loop_sides,
-                                   loop_detour=loop_detour)
-            out.append(c)
-        except requests.HTTPError:
-            pass                                  # skip a bad seed/bearing, keep going
+        specs.append((shape, seeds[shape]))
         seeds[shape] += 1
-        time.sleep(sleep)
+
+    def _build(shape, idx):
+        bearing = (center + _BEARING_OFFSETS[idx % len(_BEARING_OFFSETS)]) % 360
+        if shape == "loop":
+            # Clean geometric polygon loop; vary sides + travel direction by seed.
+            return _make_polygon_loop(
+                api_key, profile, lat, lng, target_km, bearing, timeout,
+                n_sides=loop_sides[idx % len(loop_sides)],
+                orient=(1 if (idx // len(loop_sides)) % 2 == 0 else -1),
+                detour=loop_detour)
+        if shape == "roundtrip":
+            return _make_roundtrip(api_key, profile, lat, lng, target_km, points, idx, timeout)
+        if shape == "out-and-back":
+            return _make_out_back(api_key, profile, lat, lng, target_km, bearing, timeout)
+        if shape == "rectangle":
+            return _make_rectangle(api_key, profile, lat, lng, target_km, bearing, timeout,
+                                   cross_sign=(1 if idx % 2 == 0 else -1))
+        if shape == "staging":
+            return _make_staging(api_key, profile, lat, lng, target_km, zone,
+                                 idx, timeout, loop_sides=loop_sides,
+                                 loop_detour=loop_detour)
+        if shape == "wind":
+            # Aim at the TRUE into-wind bearing (not the off-wind offsets) — the
+            # whole point is headwind out, tailwind home on different roads.
+            return _make_wind_loop(
+                api_key, profile, lat, lng, target_km,
+                into_wind_bearing if into_wind_bearing is not None else 0.0,
+                timeout, seed=idx)
+        return _make_lollipop(api_key, profile, lat, lng, target_km, bearing,
+                              idx, timeout, loop_sides=loop_sides,
+                              loop_detour=loop_detour)
+
+    # Generate concurrently — each candidate is an independent ORS round-trip, so a
+    # bounded thread pool collapses ~12 sequential calls into a few batches (within
+    # the free tier's burst). Results are slotted back into plan order so the route
+    # set AND its tie-break ordering are identical to the serial path; a seed that
+    # 404s/HTTPErrors is skipped, exactly as before. `workers=1` == fully serial.
+    slots = [None] * len(specs)
+    pool = max(1, min(workers, len(specs))) if specs else 1
+    with concurrent.futures.ThreadPoolExecutor(max_workers=pool) as ex:
+        futures = {ex.submit(_build, shape, idx): pos
+                   for pos, (shape, idx) in enumerate(specs)}
+        for fut in concurrent.futures.as_completed(futures):
+            try:
+                slots[futures[fut]] = fut.result()
+            except requests.HTTPError:
+                pass                              # skip a bad seed/bearing, keep the rest
+    out = [c for c in slots if c is not None]
 
     if not out:
         raise RuntimeError("No routes came back. Check the API key, or that the start "

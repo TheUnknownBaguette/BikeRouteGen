@@ -1,0 +1,3 @@
+# Dev/test dependencies (Task B2 will fold these into pyproject extras).
+# Install with:  pip install -r requirements.txt -r requirements-dev.txt
+pytest>=8.0

@@ -1,0 +1,9 @@
+# Minimal project config. Today this carries only the pytest settings (Task A1);
+# the full [project] table + dependency pins + dev/discord extras land in
+# CODE_HEALTH_WORKPLAN Task B2, at which point the per-test sys.path hacks can go.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
