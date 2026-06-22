@@ -241,7 +241,19 @@ break a fresh `run.bat` months from now), and `discord.py` (optional front-end) 
 
 ## Task C1 — Split `engine.py` into focused modules
 
-> **STATUS: NOT STARTED.** (Do after A1 — the test net guards the move.)
+> **STATUS: DONE (2026-06-21).** `engine.py` (1,911 lines) split into `models.py`
+> (67), `geometry.py` (140), `geocode.py` (243), `wind.py` (203), `routing.py` (790),
+> `scoring.py` (562); `engine.py` is now a 26-line compatibility facade that
+> re-exports every name (public + private) so all `engine.NAME` call sites + imports
+> are unchanged. Done mechanically via an `ast`-based splitter (bodies moved verbatim,
+> not retyped; script removed after). Dependency layering is acyclic: models/geometry
+> are leaves; geocode leaf; wind→(models,geometry,geocode); routing→(models,geometry,
+> valhalla); scoring→(models,geometry,routing). Monkeypatch caveat: the facade can't
+> absorb test rebinding, so `test_wind`/`test_weights`/`test_generate_concurrency` now
+> patch the HOME modules (`routing._ors_directions`, `wind._wind_from_*`,
+> `routing._candidate_from_waypoints`, `routing._make_*`) — documented in the facade.
+> Verified: full suite **76 passed** (2.4s, no stray network), `python -m windroute.cli
+> --help` imports clean, direct-run test path works. PROJECT_CONTEXT file-map updated.
 
 **Problem:** `engine.py` is 1,911 lines spanning five concerns (geocode, wind
 providers, ORS routing + geometry, scoring, option selection). Any change requires

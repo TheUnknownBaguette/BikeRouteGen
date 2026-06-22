@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import requests
 
-from windroute import engine, valhalla
+from windroute import engine, routing, valhalla, wind   # patch internals on home modules
 
 
 # --- avoid-corridor builder ------------------------------------------------ #
@@ -52,8 +52,8 @@ def _fake_ors(fail_on_avoid=False):
 
 def test_wind_loop_avoids_outbound_on_return():
     fake, calls = _fake_ors()
-    orig = engine._ors_directions
-    engine._ors_directions = fake
+    orig = routing._ors_directions
+    routing._ors_directions = fake
     try:
         c = engine._make_wind_loop("k", "cycling-regular", 41.5, -87.85, 40.0, 247.5,
                                    40, seed=0)
@@ -64,13 +64,13 @@ def test_wind_loop_avoids_outbound_on_return():
         assert calls[1]["type"] == "MultiPolygon"
         assert c.distance_km > 0
     finally:
-        engine._ors_directions = orig
+        routing._ors_directions = orig
 
 
 def test_wind_loop_falls_back_when_return_blocked():
     fake, calls = _fake_ors(fail_on_avoid=True)
-    orig = engine._ors_directions
-    engine._ors_directions = fake
+    orig = routing._ors_directions
+    routing._ors_directions = fake
     try:
         c = engine._make_wind_loop("k", "cycling-regular", 41.5, -87.85, 40.0, 247.5,
                                    40, seed=0)
@@ -78,7 +78,7 @@ def test_wind_loop_falls_back_when_return_blocked():
         assert len(calls) == 3                            # out, avoided(fail), plain return
         assert calls[2] is None
     finally:
-        engine._ors_directions = orig
+        routing._ors_directions = orig
 
 
 def test_wind_is_optin_shape():
@@ -120,16 +120,16 @@ def test_valhalla_decode_polyline():
 def test_get_wind_degrades_on_dual_failure():
     """Both sources failing returns a calm known=False Wind, never raises."""
     import datetime as dt
-    saved = (engine._wind_from_open_meteo, engine._wind_from_nws)
+    saved = (wind._wind_from_open_meteo, wind._wind_from_nws)
 
     def boom(*a, **k):
         raise requests.RequestException("down")
-    engine._wind_from_open_meteo = boom
-    engine._wind_from_nws = boom
+    wind._wind_from_open_meteo = boom
+    wind._wind_from_nws = boom
     try:
         w = engine.get_wind(41.5, -87.85, dt.datetime(2026, 6, 21, 8))
     finally:
-        engine._wind_from_open_meteo, engine._wind_from_nws = saved
+        wind._wind_from_open_meteo, wind._wind_from_nws = saved
     assert w.known is False
     assert w.speed_mph == 0.0
 
@@ -137,16 +137,16 @@ def test_get_wind_degrades_on_dual_failure():
 def test_get_wind_falls_back_to_nws_then_succeeds():
     """Open-Meteo failing but NWS working still returns a known wind."""
     import datetime as dt
-    saved = (engine._wind_from_open_meteo, engine._wind_from_nws)
+    saved = (wind._wind_from_open_meteo, wind._wind_from_nws)
 
     def boom(*a, **k):
         raise requests.RequestException("down")
-    engine._wind_from_open_meteo = boom
-    engine._wind_from_nws = lambda *a, **k: engine.Wind(180.0, 9.0, 14.0, "x")
+    wind._wind_from_open_meteo = boom
+    wind._wind_from_nws = lambda *a, **k: engine.Wind(180.0, 9.0, 14.0, "x")
     try:
         w = engine.get_wind(41.5, -87.85, dt.datetime(2026, 6, 21, 8))
     finally:
-        engine._wind_from_open_meteo, engine._wind_from_nws = saved
+        wind._wind_from_open_meteo, wind._wind_from_nws = saved
     assert w.known is True and w.speed_mph == 9.0
 
 

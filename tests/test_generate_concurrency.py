@@ -15,7 +15,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import requests
 
-from windroute import engine
+from windroute import engine, routing   # generate_candidates lives in routing now;
+                                         # monkeypatches must target the home module
 
 BUILD_DELAY = 0.05   # simulated per-ORS-call latency
 
@@ -44,7 +45,7 @@ def _stub_builders(monkeypatched, fail_loop_idx=None):
              "roundtrip": "_make_roundtrip", "wind": "_make_wind_loop",
              "staging": "_make_staging"}
     for shape, fn in names.items():
-        saved[fn] = getattr(engine, fn)
+        saved[fn] = getattr(routing, fn)
 
     seen = {"loop_calls": 0}
 
@@ -58,14 +59,14 @@ def _stub_builders(monkeypatched, fail_loop_idx=None):
                                 distance_km=40.0, ascent_m=0.0, paved_frac=1.0,
                                 unpaved_frac=0.0, shape="loop")
 
-    engine._make_polygon_loop = loop_stub
+    routing._make_polygon_loop = loop_stub
     for shape, fn in names.items():
         if fn != "_make_polygon_loop":
-            setattr(engine, fn, make(shape))
+            setattr(routing, fn, make(shape))
 
     def restore():
         for fn, orig in saved.items():
-            setattr(engine, fn, orig)
+            setattr(routing, fn, orig)
     return restore
 
 
@@ -128,7 +129,7 @@ def test_all_failing_raises_runtimeerror():
     try:
         def boom(*a, **k):
             raise requests.HTTPError("down")
-        engine._make_polygon_loop = boom
+        routing._make_polygon_loop = boom
         raised = False
         try:
             engine.generate_candidates(41.5, -87.8, 40.0, "road", "k", n=4,

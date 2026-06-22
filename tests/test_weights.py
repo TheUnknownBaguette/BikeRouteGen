@@ -11,7 +11,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from windroute import engine, zones
+from windroute import engine, routing, zones   # refine_candidate lives in routing now
 
 
 # --- route weights --------------------------------------------------------- #
@@ -277,8 +277,8 @@ def _fake_builder(distance_km):
 
 
 def test_refine_improves_within_budget():
-    orig = engine._candidate_from_waypoints
-    engine._candidate_from_waypoints = _fake_builder(40.0)
+    orig = routing._candidate_from_waypoints
+    routing._candidate_from_waypoints = _fake_builder(40.0)
     try:
         seed = _seed_with_waypoints()
         best, calls = engine.refine_candidate(seed, "k", "cycling-regular", 40.0, 3.0,
@@ -287,19 +287,19 @@ def test_refine_improves_within_budget():
         assert best is not seed                 # a better config was found
         assert best.total_score > seed.total_score   # refined >= (here >) seed
     finally:
-        engine._candidate_from_waypoints = orig
+        routing._candidate_from_waypoints = orig
 
 
 def test_refine_respects_length_cap():
-    orig = engine._candidate_from_waypoints
-    engine._candidate_from_waypoints = _fake_builder(999.0)   # every nudge way too long
+    orig = routing._candidate_from_waypoints
+    routing._candidate_from_waypoints = _fake_builder(999.0)   # every nudge way too long
     try:
         seed = _seed_with_waypoints()
         best, _calls = engine.refine_candidate(seed, "k", "p", 40.0, 3.0,
                                                _north_score, max_calls=4)
         assert best is seed                     # out-of-tolerance moves all rejected
     finally:
-        engine._candidate_from_waypoints = orig
+        routing._candidate_from_waypoints = orig
 
 
 def test_refine_skips_non_refinable():

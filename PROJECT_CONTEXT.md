@@ -104,7 +104,18 @@ and footer.
 
 ```
 windroute/
-  engine.py       core: geocode + suggest_places (Photon autocomplete) + parse_compass, wind (+ get_wind_historical), geometric route gen + shapes, scoring, route-option selection (NO I/O — pure fns)
+  engine.py       COMPATIBILITY FACADE: re-exports the modules below as the historical flat
+                  `engine.NAME` namespace (call sites unchanged). To MONKEYPATCH an internal,
+                  patch its HOME module, not engine (CODE_HEALTH Task C1).
+  models.py       data containers: Wind / Candidate / RouteOption (no logic)
+  geometry.py     pure primitives: _bearing/_haversine_km/_destination/_polyline_km/
+                  _self_intersections/_thin + compass_label/parse_compass/COMPASS_16
+  geocode.py      geocode + suggest_places (Photon autocomplete) + DMS/coords parsing
+  wind.py         get_wind (+ get_wind_historical): Open-Meteo primary, US NWS fallback,
+                  calm Wind(known=False) on dual failure (Task B1)
+  routing.py      ORS directions, geometric shapes, generate_candidates (CONCURRENT, Task A2),
+                  refine_candidate, surface/waytype fractions, _smoothed_ascent
+  scoring.py      RouteWeights + archetype tables, wind_score, evaluate, select_route_options, explain
   planner.py      SHARED pipeline: plan_routes() -> PlanResult (geocode->wind->staging->generate->surface->corrections->evaluate->options); optional location_label override. No printing/files. CLI + web both call it.
   zones.py        find_ride_zone: best quiet riding zone, nearest OR a forced compass direction (prefer_bearing) — for --ride-area staging
   regions.py      classify_region -> RegionProfile (terrain archetype): one Overpass read (roads + land-use) + Open-Meteo elevation (relief), cached per ~0.1° cell. classify_archetype() is pure. Diagnostic only so far (work-plan Task 1) — does NOT yet drive weights
