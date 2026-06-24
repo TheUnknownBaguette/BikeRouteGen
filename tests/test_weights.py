@@ -98,8 +98,8 @@ def test_shapes_mountain_drops_rectangle():
 
 def test_shapes_always_keeps_optin_forms():
     # opt-in shapes the caller added deliberately survive archetype filtering
-    out = engine.shapes_for("mountain", ["loop", "out-and-back", "staging", "roundtrip"])
-    for s in ("out-and-back", "staging", "roundtrip"):
+    out = engine.shapes_for("mountain", ["loop", "out-and-back", "staging"])
+    for s in ("out-and-back", "staging"):
         assert s in out
 
 

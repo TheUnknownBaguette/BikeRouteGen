@@ -188,7 +188,7 @@ python -m windroute.cli plan -l "Asheville, NC" -d 30 --classify
 | `-t, --tolerance` | Free +/- distance buffer; only distance beyond it is penalized (default 3). |
 | `-s, --start` | `"YYYY-MM-DD HH:MM"` or `now`. Sets the wind forecast hour. |
 | `-r, --ride-type` | `road` (avoid gravel) or `gravel` (seek it). |
-| `--shapes` | Comma list: `loop,lollipop,rectangle,out-and-back,roundtrip,wind` (default `loop,lollipop,rectangle`). `wind` rides headwind-out to a turnaround then takes **different roads home** with the tailwind (opt-in). `roundtrip` is the old ORS round-trip algorithm (can tangle; opt-in). |
+| `--shapes` | Comma list: `loop,lollipop,rectangle,out-and-back` (default `loop,lollipop,rectangle`). `loop` is a clean polygon (different roads out and back); `lollipop` rides a stem out, loops the far end, stems back; `rectangle` is a long leg into the wind, a short crosswind jog, and a long parallel leg home (great in grid country); `out-and-back` retraces the same roads (opt-in). |
 | `--surface-source` | `ors` (default), `osm` (finer OSM tags + bike lanes), or `both` (cross-check). |
 | `--ride-area` | `auto` to stage to the nearest quiet zone, a compass direction (`south`, `SSE`) to stage to the best quiet zone that way, or a place / `lat,lng` to force one. Omit for a normal ride from the start. |
 | `--classify` | Detect the terrain (grid-farmland, mountain, suburban, coastal, …) and **adapt the tuning to it** — weights, route shapes, quiet-zone scoring, and a region-normalized busy penalty. Off by default (your home grid-farmland results are unchanged without it). |

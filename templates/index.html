@@ -75,12 +75,20 @@
 
       <div class="field">
         <label>Route shapes</label>
+        {% set shape_help = {
+          'loop': 'A round trip on different roads out and back — the usual pick.',
+          'lollipop': 'Ride a stem out, loop around the far end, stem back.',
+          'rectangle': 'Long leg into the wind, short crosswind jog, long leg home — great in grid country.',
+          'out-and-back': 'Same roads there and back (a simple retrace).'} %}
         <div class="togs">
           {% for s in all_shapes %}
-            <label class="tog"><input type="checkbox" name="shapes" value="{{ s }}"
+            <label class="tog" title="{{ shape_help[s] }}"><input type="checkbox" name="shapes" value="{{ s }}"
               {{ 'checked' if s in d.shapes }}><span>{{ s }}</span></label>
           {% endfor %}
         </div>
+        <ul style="margin:10px 0 0; padding-left:18px; color:var(--dim); font-size:12.5px; line-height:1.6">
+          {% for s in all_shapes %}<li><strong style="color:var(--ink); font-weight:600">{{ s }}</strong> — {{ shape_help[s] }}</li>{% endfor %}
+        </ul>
       </div>
 
       <div class="grid">

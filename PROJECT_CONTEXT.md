@@ -120,7 +120,6 @@ windroute/
   zones.py        find_ride_zone: best quiet riding zone, nearest OR a forced compass direction (prefer_bearing) — for --ride-area staging
   regions.py      classify_region -> RegionProfile (terrain archetype): one Overpass read (roads + land-use) + Open-Meteo elevation (relief), cached per ~0.1° cell. classify_archetype() is pure. Diagnostic only so far (work-plan Task 1) — does NOT yet drive weights
   surface.py      OSM/Overpass surface + bike-lane + busy/path + gravel-quality source (OverpassSurface); overpass_json mirror-fallback; SurfaceProvider registry (Task 5)
-  valhalla.py     EXPERIMENTAL gated wind-biased router seam (Task 7) — off unless WINDROUTE_VALHALLA_URL set; untested against a live server
   corrections.py  personal correction cache (~/.windroute/corrections.json) + road-notes parser
   rwgps.py        Ride with GPS v1 API client (auth, list/fetch trips, trip cache, creds)
   learn.py        analyse imported trips -> rider profile + suggested weight changes (pure); geographic clustering + region_mismatch_note + save/load training-region archetype (Task 8)
@@ -245,7 +244,10 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   the baseline so its one-time corrections aren't double-applied. Budget: adds ≤ `TOP*CALLS_EACH`
   (~10) ORS calls only when `--refine` is set. Offline tests (`test_weights.py`: improves within
   budget, length cap, skips non-refinable).
-- **Wind-biased routing** (work-plan Task 7):
+- **Wind-biased routing** (work-plan Task 7) — **REMOVED in the 2026-06 shape cleanup.** The `wind`
+  shape and the whole `valhalla.py` seam below were deleted as redundant/confusing (see "Route shapes"
+  above). Kept here only as historical context for *why* a self-hosted router would be needed if
+  per-edge wind biasing is ever revisited. The code described below no longer exists.
   - **`wind` shape (stopgap, DONE, opt-in `--shapes wind`):** rides headwind-OUT to a turnaround
     (`engine._make_wind_loop`), then routes home AVOIDING the outbound corridor via ORS
     `avoid_polygons`, so the tailwind return takes **different roads** — the strategy the owner
@@ -283,10 +285,17 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   moving-average filter, hysteresis) — raw ORS ascent was wildly inflated on flat IL.
 - **Route shapes** (`--shapes`, default `loop,lollipop,rectangle`): loop, lollipop,
   **rectangle** (long leg into wind / short crosswind jog / long parallel leg home —
-  owner loves these in grid country), out-and-back (opt-in), `roundtrip` (opt-in; the
-  old ORS round_trip algorithm). Directional shapes aim into the wind first. **All
-  automatic shapes are now built from explicit geometric waypoints** (see "Clean
-  geometric routing" below) — no ORS `round_trip` unless you ask for `roundtrip`.
+  owner loves these in grid country), out-and-back (opt-in). Directional shapes aim
+  into the wind first. **All shapes are built from explicit geometric waypoints** (see
+  "Clean geometric routing" below) — no ORS `round_trip` at all.
+  - **Shape cleanup (2026-06):** the old `roundtrip` (deprecated ORS round_trip — the
+    tangle-prone predecessor of `loop`) and the experimental `wind` shape were removed
+    as redundant/confusing. The whole tool is wind-smart, so a shape *named* "wind"
+    misled, and its headwind-out/different-roads-home benefit is already what a good
+    `loop` plus the "stronger wind line" alternative deliver. Removing `wind` orphaned
+    `_make_wind_loop`, `_corridor_multipolygon`, the `avoid_polygons` ORS arg, `_thin`,
+    and the whole `valhalla.py` seam (its only caller) — all deleted. Remaining shapes:
+    loop / lollipop / rectangle / out-and-back (+ internal `staging`).
 - **Three route options** (`engine.select_route_options` -> `RouteOption`): the plan
   returns **1 recommendation + 2 alternatives**, each leading on a *different* benefit
   (stronger wind line / quieter roads / more bike lane / closer distance) and a

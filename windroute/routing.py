@@ -12,8 +12,7 @@ import time
 
 import requests
 
-from . import valhalla
-from .geometry import _bearing, _destination, _haversine_km, _polyline_km, _thin
+from .geometry import _bearing, _destination, _haversine_km, _polyline_km
 from .models import Candidate
 
 # Observability (CODE_HEALTH Task C2): a process-lifetime tally of ORS directions
@@ -76,7 +75,7 @@ PATH_WAYTYPES = {4, 6, 7}
 # --------------------------------------------------------------------------- #
 # Route generation (OpenRouteService, needs a free API key)
 # --------------------------------------------------------------------------- #
-SHAPES = ("loop", "out-and-back", "lollipop", "rectangle", "staging", "roundtrip", "wind")
+SHAPES = ("loop", "out-and-back", "lollipop", "rectangle", "staging")
 
 # Polygon-loop variety per seed: cycle vertex counts and travel orientation so a
 # handful of "loop" seeds explore different road sets / wind lines, not clones.
@@ -121,17 +120,15 @@ def _strip_backtracks(coords, eles=None, tol_m=5.0):
     return new_coords, new_eles
 
 
-def _ors_directions(api_key, profile, coordinates, timeout, round_trip=None,
-                    avoid_polygons=None):
-    """One ORS directions call.
+def _ors_directions(api_key, profile, coordinates, timeout):
+    """One ORS directions call over an explicit list of through-waypoints.
 
     Returns (coords, eles, dist_km, paved, unpaved, busy, path, path_run_km).
-    `coordinates` is ORS-order [[lng, lat], ...]; pass `round_trip` dict for loops.
-    `avoid_polygons` is a GeoJSON (Multi)Polygon ORS routes AROUND — used (Task 7)
-    to push the return leg of a wind loop off the outbound roads.
-    `busy` is the fraction of distance on arterial "State Road" class (US-highways);
-    `path` is the fraction on separated bike/foot paths (multiuse trails);
-    `path_run_km` is the longest *contiguous* path stretch (km) on this leg.
+    `coordinates` is ORS-order [[lng, lat], ...]. All route shapes are built from
+    explicit geometric waypoints (see the _make_* builders), so no ORS round_trip
+    is used. `busy` is the fraction of distance on arterial "State Road" class
+    (US-highways); `path` is the fraction on separated bike/foot paths (multiuse
+    trails); `path_run_km` is the longest *contiguous* path stretch (km) on this leg.
     """
     url = ORS_URL.format(profile=profile)
     headers = {"Authorization": api_key, "Content-Type": "application/json"}
@@ -141,13 +138,6 @@ def _ors_directions(api_key, profile, coordinates, timeout, round_trip=None,
         "elevation": True,
         "instructions": False,
     }
-    options = {}
-    if round_trip is not None:
-        options["round_trip"] = round_trip
-    if avoid_polygons is not None:
-        options["avoid_polygons"] = avoid_polygons
-    if options:
-        body["options"] = options
 
     _count_ors_call()
     resp = requests.post(url, json=body, headers=headers, timeout=timeout)
@@ -176,21 +166,6 @@ def _ors_directions(api_key, profile, coordinates, timeout, round_trip=None,
         dist_km = max(0.0, dist_km - (_polyline_km(coords) - _polyline_km(clean)))
         coords = clean
     return coords, eles, dist_km, paved, unpaved, busy, path, path_run_km
-
-
-def _make_roundtrip(api_key, profile, lat, lng, target_km, points, seed, timeout):
-    """ORS round_trip loop. Kept as an opt-in shape ("roundtrip") only: it scatters
-    via-points in a ring and connects them, which often tangles or detours onto
-    side roads (see _self_intersections). The default "loop" is now the clean
-    geometric polygon below; this stays for variety / as a fallback."""
-    coords, eles, dist, paved, unpaved, busy, path, path_run = _ors_directions(
-        api_key, profile, [[lng, lat]], timeout,
-        round_trip={"length": int(target_km * 1000), "points": points, "seed": seed})
-    return Candidate(coords=coords, distance_km=dist,
-                     ascent_m=_smoothed_ascent(eles) if eles else 0.0,
-                     paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
-                     path_frac=path, path_run_frac=(path_run / dist if dist else 0.0),
-                     shape="roundtrip")
 
 
 def _polygon_loop_waypoints(lat, lng, target_km, bearing, n_sides, orient, detour):
@@ -389,98 +364,6 @@ def _make_rectangle(api_key, profile, lat, lng, target_km, bearing, timeout,
                      path_frac=path, shape="rectangle", waypoints=verts)
 
 
-def _corridor_multipolygon(coords, buffer_m=350.0, clearance_m=600.0, max_boxes=30):
-    """A GeoJSON MultiPolygon of small squares along `coords`, for ORS avoid_polygons.
-
-    Samples the polyline ~every `buffer_m` and drops a square (half-side `buffer_m`) at
-    each, SKIPPING samples within `clearance_m` of the first/last point so the return
-    leg's endpoints (start + turnaround) aren't trapped inside an avoid zone (which
-    would make ORS return "no routable point"). Disjoint squares dodge the
-    self-intersection a buffered ribbon can hit on a curvy line. None if no usable
-    samples (e.g. a short/curled leg) — the caller then just routes home normally.
-    """
-    if len(coords) < 2:
-        return None
-    start, end = coords[0], coords[-1]
-    step_km = max(0.1, buffer_m / 1000.0)
-    clr_km = clearance_m / 1000.0
-    samples, acc, prev = [], step_km, coords[0]
-    for p in coords:
-        acc += _haversine_km(prev, p)
-        prev = p
-        if acc >= step_km:
-            acc = 0.0
-            if _haversine_km(p, start) >= clr_km and _haversine_km(p, end) >= clr_km:
-                samples.append(p)
-    if not samples:
-        return None
-    if len(samples) > max_boxes:
-        samples = samples[::(len(samples) // max_boxes) + 1]
-    polys = []
-    for la, lo in samples:
-        dlat = buffer_m / 111320.0
-        dlng = buffer_m / (111320.0 * max(0.1, math.cos(math.radians(la))))
-        ring = [[lo - dlng, la - dlat], [lo + dlng, la - dlat],
-                [lo + dlng, la + dlat], [lo - dlng, la + dlat], [lo - dlng, la - dlat]]
-        polys.append([ring])
-    return {"type": "MultiPolygon", "coordinates": polys}
-
-
-def _make_wind_loop(api_key, profile, lat, lng, target_km, into_wind_bearing, timeout,
-                    seed=0, detour=1.35, buffer_m=350.0):
-    """Headwind-out / tailwind-home loop on DIFFERENT roads each way (Task 7 stopgap).
-
-    Ride out to a turnaround into the wind (~half the ride), then route home AVOIDING
-    the outbound corridor (`avoid_polygons`) so the tailwind return takes different
-    roads — the strategy the owner rides by hand. Small per-seed jitter on aim +
-    turnaround distance gives variety across seeds. If a Valhalla wind router is
-    configured (experimental, off by default) the OUTBOUND corridor comes from it,
-    re-traced through ORS for surface/waytype extras; otherwise plain ORS. If the
-    avoided return can't be routed, fall back to a plain return so a route always
-    comes back.
-    """
-    crow = (target_km / 2.0) / detour
-    aim = (into_wind_bearing + (-10.0 if seed % 2 else 10.0) * (seed // 2)) % 360
-    crow *= (1.0 + 0.05 * ((seed % 3) - 1))            # +/-5% length variety
-    tlat, tlng = _destination(lat, lng, aim, crow)
-
-    out_pts = [[lng, lat], [tlng, tlat]]
-    if valhalla.enabled():                              # experimental, gated off by default
-        try:
-            vc = valhalla.wind_biased_leg(lat, lng, tlat, tlng, into_wind_bearing, timeout)
-            if vc and len(vc) >= 2:
-                out_pts = [[p[1], p[0]] for p in _thin(vc, 8)]   # retrace via ORS
-        except Exception:
-            out_pts = [[lng, lat], [tlng, tlat]]        # any Valhalla issue -> plain ORS
-
-    o_coords, o_eles, o_dist, o_pav, o_unp, o_busy, o_path, o_run = _ors_directions(
-        api_key, profile, out_pts, timeout)
-    glat, glng = o_coords[-1]                           # real routed turnaround node
-
-    avoid = _corridor_multipolygon(o_coords, buffer_m)
-    try:
-        b_coords, b_eles, b_dist, b_pav, b_unp, b_busy, b_path, b_run = _ors_directions(
-            api_key, profile, [[glng, glat], [lng, lat]], timeout, avoid_polygons=avoid)
-    except requests.HTTPError:                          # avoided return unroutable
-        b_coords, b_eles, b_dist, b_pav, b_unp, b_busy, b_path, b_run = _ors_directions(
-            api_key, profile, [[glng, glat], [lng, lat]], timeout)
-
-    full_coords = o_coords + b_coords[1:]
-    full_eles = (o_eles + b_eles[1:]) if (o_eles and b_eles) else []
-    total = o_dist + b_dist
-    ow, bw = o_dist, b_dist
-    tot = ow + bw
-    paved = (o_pav * ow + b_pav * bw) / tot if tot else 1.0
-    unpaved = (o_unp * ow + b_unp * bw) / tot if tot else 0.0
-    busy = (o_busy * ow + b_busy * bw) / tot if tot else 0.0
-    path = (o_path * ow + b_path * bw) / tot if tot else 0.0
-    path_run = max(o_run, b_run) / total if total else 0.0
-    return Candidate(coords=full_coords, distance_km=total,
-                     ascent_m=_smoothed_ascent(full_eles) if full_eles else 0.0,
-                     paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
-                     path_frac=path, path_run_frac=path_run, shape="wind")
-
-
 def _candidate_from_waypoints(api_key, profile, waypoints, shape, timeout):
     """Route a through-path over `waypoints` ((lat,lng) corners) -> a Candidate.
 
@@ -553,13 +436,13 @@ ORS_MAX_WORKERS = 6   # candidate ORS calls in flight at once (free tier ~40 req
 
 
 def generate_candidates(lat, lng, target_km, ride_type, api_key,
-                        n=8, points=5, timeout=40, sleep=0.4,
+                        n=8, timeout=40, sleep=0.4,
                         shapes=("loop",), into_wind_bearing=None, zone=None,
                         loop_geom=None, workers=ORS_MAX_WORKERS):
     """Generate `n` candidate routes of ~target_km from (lat, lng).
 
-    `shapes` chooses which route forms to produce ("loop", "out-and-back",
-    "lollipop"); `n` is split across them. Directional shapes (out-and-back,
+    `shapes` chooses which route forms to produce ("loop", "lollipop", "rectangle",
+    "out-and-back"); `n` is split across them. Directional shapes (out-and-back,
     lollipop) are aimed at `into_wind_bearing` first (so you ride out into the
     wind, home with a tailwind) with widening offsets for variety; everything is
     still scored by `evaluate` afterward. ORS caps loop length at 100 km.
@@ -621,8 +504,6 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
                 n_sides=loop_sides[idx % len(loop_sides)],
                 orient=(1 if (idx // len(loop_sides)) % 2 == 0 else -1),
                 detour=loop_detour)
-        if shape == "roundtrip":
-            return _make_roundtrip(api_key, profile, lat, lng, target_km, points, idx, timeout)
         if shape == "out-and-back":
             return _make_out_back(api_key, profile, lat, lng, target_km, bearing, timeout)
         if shape == "rectangle":
@@ -632,13 +513,6 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
             return _make_staging(api_key, profile, lat, lng, target_km, zone,
                                  idx, timeout, loop_sides=loop_sides,
                                  loop_detour=loop_detour)
-        if shape == "wind":
-            # Aim at the TRUE into-wind bearing (not the off-wind offsets) — the
-            # whole point is headwind out, tailwind home on different roads.
-            return _make_wind_loop(
-                api_key, profile, lat, lng, target_km,
-                into_wind_bearing if into_wind_bearing is not None else 0.0,
-                timeout, seed=idx)
         return _make_lollipop(api_key, profile, lat, lng, target_km, bearing,
                               idx, timeout, loop_sides=loop_sides,
                               loop_detour=loop_detour)

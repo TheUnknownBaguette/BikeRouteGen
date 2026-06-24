@@ -226,13 +226,13 @@ def shapes_for(archetype, requested):
 
     The archetype provides the *allowed* default set; an explicit user shape that
     the archetype rejects (e.g. a rectangle in the mountains) is dropped. Special
-    shapes the caller adds deliberately ('staging', 'out-and-back', 'roundtrip')
-    are always honoured — they're opt-in, not archetype defaults. Never returns an
-    empty list (falls back to the requested list, then to 'loop').
+    shapes the caller adds deliberately ('staging', 'out-and-back') are always
+    honoured — they're opt-in, not archetype defaults. Never returns an empty list
+    (falls back to the requested list, then to 'loop').
     """
     allowed = set(SHAPES_BY_ARCHETYPE.get(archetype or "grid-farmland",
                                           SHAPES_BY_ARCHETYPE["grid-farmland"]))
-    always = {"staging", "out-and-back", "roundtrip", "wind"}
+    always = {"staging", "out-and-back"}
     out = [s for s in requested if s in allowed or s in always]
     return out or list(requested) or ["loop"]
 

@@ -353,6 +353,11 @@ carries the non-obvious decisions/gotchas. (Owner reviews — docs are taste.)
 > would lose wired-in work for no real maintenance saving). Rate-limiter: added an
 > explicit SCALING CAVEAT comment in `webapp.py` — the in-memory per-process window
 > multiplies if you raise worker/instance count; move to a shared store before scaling.
+>
+> **UPDATE (2026-06, shape cleanup):** `valhalla.py` was later **removed** after all —
+> the `wind` shape (its only caller) was deleted as redundant/confusing, leaving the
+> seam orphaned. A dead module with zero callers is exactly the cruft this plan targets,
+> so it went. Revisit a self-hosted router only if per-edge wind biasing is ever taken on.
 
 - `valhalla.py` is shipped, gated off, untested against any live server, and needs a
   custom costing model to do anything (per its own docstring). Consider moving it to a

@@ -110,7 +110,7 @@ FORM_DEFAULTS = {
     "surface_source": "ors", "ride_area": "", "tolerance": "3",
     "candidates": "12", "corrections": True, "classify": False, "refine": False,
 }
-ALL_SHAPES = ["loop", "lollipop", "rectangle", "out-and-back", "roundtrip", "wind"]
+ALL_SHAPES = ["loop", "lollipop", "rectangle", "out-and-back"]
 
 
 def _sweep_old_files():

@@ -42,7 +42,6 @@ def _stub_builders(monkeypatched, fail_loop_idx=None):
 
     names = {"loop": "_make_polygon_loop", "rectangle": "_make_rectangle",
              "lollipop": "_make_lollipop", "out-and-back": "_make_out_back",
-             "roundtrip": "_make_roundtrip", "wind": "_make_wind_loop",
              "staging": "_make_staging"}
     for shape, fn in names.items():
         saved[fn] = getattr(routing, fn)

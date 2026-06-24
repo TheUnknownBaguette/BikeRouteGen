@@ -70,17 +70,6 @@ def _self_intersections(coords):
     return count
 
 
-def _thin(points, n):
-    """Keep ~`n` evenly-spaced points from a polyline, always including both ends."""
-    if len(points) <= n:
-        return list(points)
-    stride = max(1, len(points) // n)
-    out = points[::stride]
-    if out[-1] != points[-1]:
-        out.append(points[-1])
-    return out
-
-
 # --------------------------------------------------------------------------- #
 # Geometry + scoring
 # --------------------------------------------------------------------------- #

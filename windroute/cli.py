@@ -61,13 +61,12 @@ def plan(
     shapes: str = typer.Option(
         "loop,lollipop,rectangle", "--shapes",
         help="Comma list of route forms to consider: loop, lollipop, rectangle, "
-             "out-and-back, roundtrip, wind. 'loop' is a clean geometric polygon "
-             "routed through corners around the start (no scattered via-points). A "
-             "rectangle is a long leg into the wind, a short crosswind jog, and a "
-             "long parallel leg home. 'wind' rides headwind-out to a turnaround then "
-             "takes DIFFERENT roads home with the tailwind (opt-in). 'roundtrip' is "
-             "the older ORS round_trip algorithm (can tangle; opt-in). Pure "
-             "out-and-backs are off by default; add 'out-and-back' to allow them."),
+             "out-and-back. 'loop' is a clean geometric polygon routed through "
+             "corners around the start (different roads out and back). 'lollipop' "
+             "rides a stem out, loops the far end, and stems back. 'rectangle' is a "
+             "long leg into the wind, a short crosswind jog, and a long parallel leg "
+             "home (great in grid country). Pure 'out-and-back's (same roads back) "
+             "are off by default; add it to allow them."),
     surface_source: str = typer.Option(
         "ors", "--surface-source",
         help="Surface data: 'ors' (default, from the route call), "
