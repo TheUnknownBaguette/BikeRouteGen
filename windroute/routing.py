@@ -207,7 +207,7 @@ def _make_polygon_loop(api_key, profile, lat, lng, target_km, bearing, timeout,
                      ascent_m=_smoothed_ascent(eles) if eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
                      path_frac=path, path_run_frac=(path_run / dist if dist else 0.0),
-                     shape="loop", waypoints=list(verts))
+                     shape="loop", eles=eles or None, waypoints=list(verts))
 
 
 def _make_out_back(api_key, profile, lat, lng, target_km, bearing, timeout, detour=1.3):
@@ -225,7 +225,7 @@ def _make_out_back(api_key, profile, lat, lng, target_km, bearing, timeout, deto
                      ascent_m=_smoothed_ascent(full_eles) if full_eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
                      path_frac=path, path_run_frac=(path_run / dist if dist else 0.0),
-                     shape="out-and-back")
+                     shape="out-and-back", eles=full_eles or None)
 
 
 def _make_lollipop(api_key, profile, lat, lng, target_km, bearing, seed,
@@ -271,7 +271,8 @@ def _make_lollipop(api_key, profile, lat, lng, target_km, bearing, seed,
     return Candidate(coords=full_coords, distance_km=total_dist,
                      ascent_m=_smoothed_ascent(full_eles) if full_eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
-                     path_frac=path, path_run_frac=path_run, shape="lollipop")
+                     path_frac=path, path_run_frac=path_run, shape="lollipop",
+                     eles=full_eles or None)
 
 
 def _make_staging(api_key, profile, lat, lng, target_km, zone, seed,
@@ -331,7 +332,7 @@ def _make_staging(api_key, profile, lat, lng, target_km, zone, seed,
                      ascent_m=_smoothed_ascent(full_eles) if full_eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
                      path_frac=path, path_run_frac=path_run, shape="staging",
-                     score_coords=l_coords)
+                     eles=full_eles or None, score_coords=l_coords)
 
 
 def _make_rectangle(api_key, profile, lat, lng, target_km, bearing, timeout,
@@ -361,7 +362,7 @@ def _make_rectangle(api_key, profile, lat, lng, target_km, bearing, timeout,
                      ascent_m=_smoothed_ascent(eles) if eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
                      path_run_frac=(path_run / dist if dist else 0.0),
-                     path_frac=path, shape="rectangle", waypoints=verts)
+                     path_frac=path, shape="rectangle", eles=eles or None, waypoints=verts)
 
 
 def _candidate_from_waypoints(api_key, profile, waypoints, shape, timeout):
@@ -378,7 +379,7 @@ def _candidate_from_waypoints(api_key, profile, waypoints, shape, timeout):
                      ascent_m=_smoothed_ascent(eles) if eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
                      path_frac=path, path_run_frac=(path_run / dist if dist else 0.0),
-                     shape=shape, waypoints=list(waypoints))
+                     shape=shape, eles=eles or None, waypoints=list(waypoints))
 
 
 def refine_candidate(cand, api_key, profile, target_km, tolerance_km, score_fn,

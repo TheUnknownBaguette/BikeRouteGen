@@ -157,8 +157,38 @@
     .optgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:16px; }
     .opt h3 { margin:0 0 12px; font-size:18px; display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
     .opt.rec { border:2px solid #bcd2ff; box-shadow:var(--sh-md); }
-    .opt img { width:100%; border-radius:var(--r); border:1px solid var(--line); display:block; }
-    .opt .alt-map img { aspect-ratio:16/10; object-fit:cover; }
+    .map { width:100%; height:340px; border-radius:var(--r); border:1px solid var(--line);
+      background:#eef3fb; z-index:0; }
+    .map.sm { height:190px; }
+    .map-hint { color:var(--faint); font-size:12px; margin:7px 0 0; display:flex; align-items:center; gap:5px; }
+    .map-hint svg { width:13px; height:13px; }
+    .leaflet-container { font: inherit; }
+    .leaflet-popup-content a { color:var(--brand); font-weight:600; text-decoration:none; }
+    /* clickable option title -> opens the fullscreen route view */
+    .opt-title { cursor:pointer; }
+    .opt-title:hover .opt-name { text-decoration:underline; text-decoration-color:var(--line2); }
+    .opt-title .expand { color:var(--faint); margin-left:auto; display:inline-flex; align-items:center;
+      gap:5px; font-size:12px; font-weight:600; }
+    .opt-title .expand svg { width:15px; height:15px; }
+    /* elevation profile */
+    .elev { margin:10px 0 0; }
+    .elev svg { display:block; width:100%; height:auto; }
+    .elev-cap { color:var(--faint); font-size:12px; margin:4px 0 0; }
+    /* fullscreen route modal */
+    .modal[hidden] { display:none; }
+    .modal { position:fixed; inset:0; z-index:1000; display:flex; padding:3vh 3vw; }
+    .modal-backdrop { position:absolute; inset:0; background:rgba(12,22,40,.55); }
+    .modal-box { position:relative; margin:auto; width:min(1000px,94vw); height:min(90vh,860px);
+      background:var(--surface); border-radius:var(--r-lg); box-shadow:var(--sh-lg); overflow:hidden;
+      display:flex; flex-direction:column; }
+    .modal-head { display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:1px solid var(--line); }
+    .modal-head strong { font-size:16px; }
+    .modal-x { margin-left:auto; background:none; border:0; cursor:pointer; color:var(--dim);
+      width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center; }
+    .modal-x:hover { background:var(--bg); color:var(--ink); }
+    .modal-x svg { width:20px; height:20px; }
+    #modal-map { flex:1; min-height:0; border:0; border-radius:0; }
+    .modal-elev { padding:12px 18px 16px; border-top:1px solid var(--line); }
     .opt ul { margin:12px 0 14px; padding-left:18px; color:var(--dim); font-size:14px; }
     .opt li { margin:3px 0; }
     .stats { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
@@ -192,6 +222,7 @@
       .card { padding:20px; } main.wrap { margin-top:-54px; }
     }
   </style>
+  {% block head %}{% endblock %}
 </head>
 <body>
   <header class="hero">

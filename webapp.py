@@ -92,7 +92,8 @@ def _security_headers(resp):
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "no-referrer"
     resp.headers["Content-Security-Policy"] = (
-        "default-src 'self'; img-src 'self' data:; "
+        "default-src 'self'; "
+        "img-src 'self' data: https://*.tile.openstreetmap.org; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
@@ -226,15 +227,10 @@ def plan():
     for i, opt in enumerate(result.options):
         c = opt.candidate
         base = OUT_DIR / f"{token}-{i}"
-        meta = {
-            "title": f"{c.distance_km * to_mi:.0f} mi {ride_type} {c.shape} "
-                     f"- {opt.headline}",
-            "location": result.location_label,
-            "when": result.wind.valid_time.replace("T", " "),
-            "ride_type": ride_type,
-        }
-        render.render_map(c, result.wind, meta, str(base.with_suffix(".png")))
-        render.write_gpx(c.coords, str(base.with_suffix(".gpx")), name=meta["title"])
+        title = f"{c.distance_km * to_mi:.0f} mi {ride_type} {c.shape} - {opt.headline}"
+        # Maps are now interactive (Leaflet, client-side from these coords), so no
+        # server-side PNG is rendered for the web; the GPX is still written for download.
+        render.write_gpx(c.coords, str(base.with_suffix(".gpx")), name=title)
         verdict = ("into wind first" if c.wind_score > 0.2
                    else "wind against" if c.wind_score < -0.2 else "neutral")
         cards.append({
@@ -246,8 +242,9 @@ def plan():
             "good_gravel_pct": c.good_gravel_frac * 100,
             "unrideable_pct": c.unrideable_frac * 100,
             "cross": c.self_intersections,
-            "png": f"out/{base.name}.png", "gpx": f"{base.name}.gpx",
-            "dlname": f"{dlnames[i]}.gpx",
+            "coords": [[round(lat, 5), round(lng, 5)] for lat, lng in c.coords],
+            "eles": [round(e) for e in c.eles] if c.eles else [],
+            "gpx": f"{base.name}.gpx", "dlname": f"{dlnames[i]}.gpx",
         })
 
     ranked_rows = [{

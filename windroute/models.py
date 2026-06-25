@@ -40,6 +40,8 @@ class Candidate:
     good_gravel_frac: float = 0.0  # fraction on confirmed GOOD gravel (OSM quality; Task 3c)
     unrideable_frac: float = 0.0   # fraction on unrideable surface (mud/ground/grade5; OSM only)
     surface_by_source: dict = field(default_factory=dict)  # source name -> unpaved_frac
+    eles: list = None           # elevation (m) per point, aligned with `coords` (for the
+                                # web elevation profile). None when ORS returned no elevation.
     score_coords: list = None   # subset of coords the wind score uses (staging: the
                                 # destination loop only, so the fixed transit legs to/from
                                 # a ride zone don't dominate the wind line). None = whole route.

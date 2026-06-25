@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% block title %}windroute — {{ label }}{% endblock %}
 {% block sub %}Routes for {{ label }} · {{ wind.when }}{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet.css') }}">
+{% endblock %}
 {% block content %}
 
   <div class="card wind-card">
@@ -34,8 +37,16 @@
   {% for c in cards %}
     {% if c.role == 'recommended' %}
       <div class="card opt rec">
-        <h3><span class="badge rec">Recommended</span> {{ c.headline }}</h3>
-        <img src="{{ url_for('static', filename=c.png) }}" alt="map of the recommended route">
+        <h3 class="opt-title" data-route="0" role="button" tabindex="0"
+            title="Open this route full screen">
+          <span class="badge rec">Recommended</span> <span class="opt-name">{{ c.headline }}</span>
+          <span class="expand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg> Expand</span>
+        </h3>
+        <div class="map" data-route="0" aria-label="interactive map of the recommended route"></div>
+        <p class="map-hint">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          Drag to pan, scroll to zoom · click the title to open full screen · click the map for Street View.</p>
+        <div class="elev" data-route="0"></div>
         <div class="stats">
           <span class="stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 12l4-4M3 12l4 4M21 12l-4-4M21 12l-4 4"/></svg>{{ '%.1f'|format(c.dist_mi) }} mi · {{ '%.0f'|format(c.dist_km) }} km</span>
           <span class="stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18l6-8 4 5 3-4 5 7z"/></svg>+{{ '%.0f'|format(c.ascent_m) }} m</span>
@@ -58,8 +69,13 @@
     <div class="optgrid">
       {% for c in alts %}
         <div class="card opt" style="margin:0">
-          <h3 style="font-size:16px"><span class="badge alt">Option {{ loop.index }}</span> {{ c.headline }}</h3>
-          <div class="alt-map"><img src="{{ url_for('static', filename=c.png) }}" alt="map of an alternative route"></div>
+          <h3 class="opt-title" style="font-size:16px" data-route="{{ loop.index }}"
+              role="button" tabindex="0" title="Open this route full screen">
+            <span class="badge alt">Option {{ loop.index }}</span> <span class="opt-name">{{ c.headline }}</span>
+            <span class="expand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></span>
+          </h3>
+          <div class="map sm" data-route="{{ loop.index }}" aria-label="interactive map of an alternative route"></div>
+          <div class="elev" data-route="{{ loop.index }}"></div>
           <div class="stats">
             <span class="stat">{{ '%.1f'|format(c.dist_mi) }} mi</span>
             <span class="stat">+{{ '%.0f'|format(c.ascent_m) }} m</span>
@@ -104,4 +120,24 @@
     </div>
   </details>
 
+  <div id="route-modal" class="modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-label="Route detail">
+      <div class="modal-head">
+        <strong id="modal-title">Route</strong>
+        <button class="modal-x" data-close type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div id="modal-map" class="map"></div>
+      <div class="modal-elev"><div class="elev" id="modal-elev"></div></div>
+    </div>
+  </div>
+
+  {% for c in cards %}
+    <script type="application/json" class="route-data" data-route="{{ loop.index0 }}"
+      data-title="{{ c.headline }}">{{ {'coords': c.coords, 'eles': c.eles} | tojson }}</script>
+  {% endfor %}
+  <script src="{{ url_for('static', filename='vendor/leaflet.js') }}"></script>
+  <script src="{{ url_for('static', filename='map.js') }}"></script>
 {% endblock %}
