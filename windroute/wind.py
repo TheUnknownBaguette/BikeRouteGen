@@ -2,21 +2,39 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 import re
 
 import requests
 
 from .geocode import USER_AGENT
-from .geometry import COMPASS_16
-from .models import Wind
+from .geometry import COMPASS_16, _destination
+from .models import Wind, WindField
 
 
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 
 
-def get_wind(lat: float, lng: float, when: dt.datetime) -> Wind:
+# Wind-field sampling: the start plus a ring of points around it, so a route's
+# far side can see a different wind than the start (lake breezes, fronts). The
+# ring sits at ~1/3 of the ride distance (about where a loop's far side is).
+FIELD_RING_POINTS = 6
+FIELD_RING_FRAC = 1.0 / 3.0
+FIELD_RING_MIN_KM = 3.0
+FIELD_HOURS_BEFORE = 1        # hours of forecast kept before the start ...
+FIELD_HOURS_AFTER = 12        # ... and after it (covers a 100 km ride at any pace)
+
+
+def get_wind(lat: float, lng: float, when: dt.datetime,
+             radius_km: float = None) -> Wind:
     """Wind forecast for the hour nearest `when` (naive local time).
+
+    With `radius_km` (the ride's rough reach), the returned Wind also carries a
+    `field`: hourly wind at the start and a ring of points around it, so scoring
+    can use the wind you'll meet along the route as the ride goes on. Without it
+    (or from the NWS fallback, which is single-point) `field` is the start-point
+    hourly series or None.
 
     Open-Meteo is the primary source (free, no key, worldwide). If it fails — most
     notably HTTP 429 when running from a shared cloud IP that Open-Meteo throttles
@@ -31,7 +49,7 @@ def get_wind(lat: float, lng: float, when: dt.datetime) -> Wind:
     """
     fetch_errors = (requests.RequestException, ValueError, KeyError, IndexError)
     try:
-        return _wind_from_open_meteo(lat, lng, when)
+        return _wind_from_open_meteo(lat, lng, when, radius_km)
     except fetch_errors:
         pass
     try:
@@ -41,12 +59,20 @@ def get_wind(lat: float, lng: float, when: dt.datetime) -> Wind:
                     valid_time="", known=False)
 
 
-def _wind_from_open_meteo(lat: float, lng: float, when: dt.datetime) -> Wind:
+def _wind_from_open_meteo(lat: float, lng: float, when: dt.datetime,
+                         radius_km: float = None) -> Wind:
+    points = [(lat, lng)]
+    if radius_km:
+        ring = max(FIELD_RING_MIN_KM, radius_km * FIELD_RING_FRAC)
+        points += [_destination(lat, lng, i * 360.0 / FIELD_RING_POINTS, ring)
+                   for i in range(FIELD_RING_POINTS)]
     r = requests.get(
         FORECAST_URL,
         params={
-            "latitude": lat,
-            "longitude": lng,
+            # Open-Meteo takes comma-separated coordinates for several locations
+            # in one request and then returns a list (one object per location).
+            "latitude": ",".join(f"{p[0]:.4f}" for p in points),
+            "longitude": ",".join(f"{p[1]:.4f}" for p in points),
             "hourly": "wind_speed_10m,wind_direction_10m,wind_gusts_10m",
             "wind_speed_unit": "mph",
             "timezone": "auto",
@@ -55,14 +81,37 @@ def _wind_from_open_meteo(lat: float, lng: float, when: dt.datetime) -> Wind:
         timeout=20,
     )
     r.raise_for_status()
-    h = r.json()["hourly"]
-    idx = _nearest_time_index(h["time"], when)
-    return Wind(
-        direction_from_deg=float(h["wind_direction_10m"][idx]),
-        speed_mph=float(h["wind_speed_10m"][idx]),
-        gust_mph=float(h["wind_gusts_10m"][idx]),
-        valid_time=h["time"][idx],
-    )
+    data = r.json()
+    hourlies = [d["hourly"] for d in (data if isinstance(data, list) else [data])]
+    w = _wind_from_hourly(hourlies[0], when)
+    w.field = _field_from_hourlies(points, hourlies, when)
+    return w
+
+
+def _field_from_hourlies(points, hourlies, when: dt.datetime):
+    """Build a WindField from per-point Open-Meteo `hourly` blocks (same times),
+    trimmed to the hours around the ride. None if the window has no data."""
+    t0 = when.replace(minute=0, second=0, microsecond=0)
+    times = [dt.datetime.fromisoformat(t) for t in hourlies[0]["time"]]
+    keep = [i for i, t in enumerate(times)
+            if -FIELD_HOURS_BEFORE <= (t - t0).total_seconds() / 3600 <= FIELD_HOURS_AFTER]
+    keep = [i for i in keep
+            if all(h["wind_speed_10m"][i] is not None
+                   and h["wind_direction_10m"][i] is not None for h in hourlies)]
+    if not keep:
+        return None
+    hours = [(times[i] - when).total_seconds() / 3600 for i in keep]
+    us, vs = [], []
+    for h in hourlies:
+        u_row, v_row = [], []
+        for i in keep:
+            spd = float(h["wind_speed_10m"][i])
+            rad = math.radians(float(h["wind_direction_10m"][i]))
+            u_row.append(spd * math.sin(rad))
+            v_row.append(spd * math.cos(rad))
+        us.append(u_row)
+        vs.append(v_row)
+    return WindField(points=list(points), hours=hours, u=us, v=vs)
 
 
 def _wind_from_nws(lat: float, lng: float, when: dt.datetime) -> Wind:
@@ -91,11 +140,19 @@ def _wind_from_nws(lat: float, lng: float, when: dt.datetime) -> Wind:
         diff = abs((t - target).total_seconds())
         if best_diff is None or diff < best_diff:
             best_diff, best = diff, per
+    # The same periods give a start-point-only wind field (time, no space), so a
+    # changing wind is still accounted for when Open-Meteo is unavailable.
+    hourly = {"time": [], "wind_speed_10m": [], "wind_direction_10m": []}
+    for per in periods:
+        hourly["time"].append(str(per["startTime"])[:16])
+        hourly["wind_speed_10m"].append(_parse_mph(per.get("windSpeed")))
+        hourly["wind_direction_10m"].append(_compass_to_deg(per.get("windDirection")))
     return Wind(
         direction_from_deg=_compass_to_deg(best.get("windDirection")),
         speed_mph=_parse_mph(best.get("windSpeed")),
         gust_mph=_parse_mph(best.get("windGust")),
         valid_time=str(best.get("startTime", ""))[:16],   # 'YYYY-MM-DDTHH:MM'
+        field=_field_from_hourlies([(lat, lng)], [hourly], when),
     )
 
 

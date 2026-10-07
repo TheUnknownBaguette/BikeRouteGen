@@ -4,9 +4,9 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 
-from .geometry import (_bearing, _haversine_km, _polyline_km,
+from .geometry import (_bearing, _destination, _haversine_km, _polyline_km,
                        _self_intersections, compass_label)
-from .models import Candidate, RouteOption, Wind
+from .models import Candidate, RouteOption, Wind, WindField
 from .routing import _LOOP_SIDES
 
 
@@ -37,6 +37,172 @@ def wind_score(coords, into_wind_bearing) -> float:
         return sum(d * hw for d, hw in group) / s if s > 0 else 0.0
 
     return wmean(first) - wmean(second)
+
+
+# Changing wind (the wind you'll MEET, not the wind when you leave). A loop in a
+# steady wind nets out to zero headwind, so the only thing that matters is WHEN
+# you take it (into it first, tailwind home). When the wind dies or shifts during
+# the ride that's no longer true: riding out into a headwind that's gone by the
+# time you turn home just means a headwind with no payback. So the timed score is
+#     (headwind out - headwind back) - WIND_NET_WEIGHT * net headwind,
+# all over the mean wind speed met. In a steady wind the net term is ~0 and this
+# is exactly `wind_score`. The weight sets the break-even: with 4, riding into a
+# wind first still wins as long as it holds at >= 1/3 of its strength for the ride
+# home (b/a > (W-2)/(W+2)); if it'll drop below that, tailwind-out wins.
+WIND_NET_WEIGHT = 4.0
+DEFAULT_RIDE_SPEED_MPH = 16.0
+_MPH_TO_KMH = 1.609344
+
+
+def _route_offset_km(coords, score_coords):
+    """Distance ridden before `score_coords` starts within `coords` (staging: the
+    transit leg to the ride zone), so the scored loop is timed from when you
+    actually get there. 0 when they're the same route or it can't be located."""
+    if not score_coords or score_coords is coords:
+        return 0.0
+    try:
+        i = coords.index(score_coords[0])
+    except ValueError:
+        return 0.0
+    return _polyline_km(coords[:i + 1])
+
+
+# Riding speed isn't constant: you go slower into a headwind and faster with a
+# tailwind, so the clock (and so the wind you meet later) depends on the wind you
+# met earlier. Ground speed = your average - WIND_SPEED_EFFECT * headwind, which
+# grows with the wind's strength: at 0.25 a 12 mph headwind costs ~3 mph and a 12
+# mph tailwind gives ~3 back (riders push harder into the wind, so this is milder
+# than constant-power physics). Clamped to a sane band of your average.
+WIND_SPEED_EFFECT = 0.25
+GROUND_SPEED_MIN_FRAC = 0.5
+GROUND_SPEED_MAX_FRAC = 1.6
+
+
+def ground_speed_mph(speed_mph, headwind_mph):
+    """Your speed on a stretch with this headwind (+) / tailwind (-) component."""
+    v = speed_mph - WIND_SPEED_EFFECT * headwind_mph
+    return max(GROUND_SPEED_MIN_FRAC * speed_mph, min(GROUND_SPEED_MAX_FRAC * speed_mph, v))
+
+
+def _ride_segments(coords, field, speed_mph, start_hours=0.0):
+    """Ride `coords` through `field`: [(d_km, headwind_mph, wind_mph), ...] plus the
+    finishing clock in hours. Each segment's wind is looked up at its midpoint at
+    the time you get there, and its ground speed follows that headwind."""
+    segs = []
+    t = start_hours
+    for a, b in zip(coords, coords[1:]):
+        d = _haversine_km(a, b)
+        if d <= 0:
+            continue
+        mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+        brg = math.radians(_bearing(a, b))
+        # wind at the midpoint, timed with your base pace (segments are short)
+        u, v = field.vector_at(mid[0], mid[1], t + d / 2 / (speed_mph * _MPH_TO_KMH))
+        # FROM-vector . travel unit vector = headwind component (+ head, - tail)
+        hw = u * math.sin(brg) + v * math.cos(brg)
+        segs.append((d, hw, math.hypot(u, v)))
+        t += d / (ground_speed_mph(speed_mph, hw) * _MPH_TO_KMH)
+    return segs, t
+
+
+def timed_wind_score(coords, field, speed_mph=DEFAULT_RIDE_SPEED_MPH,
+                     start_offset_km=0.0):
+    """Score a route against the wind met at each point at the time you reach it.
+
+    Rides the route at `speed_mph`, slowed by headwinds and sped up by tailwinds
+    (`ground_speed_mph`), looking up the wind from `field` (a WindField) at each
+    segment's midpoint and arrival time. Returns (score, head_out_mph,
+    head_back_mph, ride_hours): score is on `wind_score`'s scale (~[-2, +2], + =
+    good), the middle two are the mean headwind (+) / tailwind (-) in mph on each
+    half, and ride_hours is how long the route takes at that pace in that wind.
+    `start_offset_km` delays the clock (riding a transit leg first, at base pace).
+    """
+    speed_mph = max(1.0, speed_mph)
+    start = start_offset_km / (speed_mph * _MPH_TO_KMH)
+    segs, end = _ride_segments(coords, field, speed_mph, start)
+    hours = end - start
+    total = sum(d for d, _, _ in segs)
+    if total <= 0:
+        return 0.0, 0.0, 0.0, 0.0
+    half, run = total / 2.0, 0.0
+    first, second = [], []
+    for s in segs:
+        (first if run < half else second).append(s)
+        run += s[0]
+
+    def wmean(group, k):
+        tot = sum(s[0] for s in group)
+        return sum(s[0] * s[k] for s in group) / tot if tot > 0 else 0.0
+
+    out_mph, back_mph = wmean(first, 1), wmean(second, 1)
+    met = wmean(segs, 2)                          # mean wind speed met on the ride
+    if met <= 1e-6:
+        return 0.0, out_mph, back_mph, hours
+    net = wmean(segs, 1)
+    score = ((out_mph - back_mph) - WIND_NET_WEIGHT * net) / met
+    return max(-2.0, min(2.0, score)), out_mph, back_mph, hours
+
+
+def best_aim_bearing(field, lat, lng, target_km, speed_mph, default_bearing,
+                     step_deg=15.0, tie=0.05):
+    """The heading to aim candidates at so they ride the forecast wind well.
+
+    Candidates are seeded around one bearing (into the wind, with offsets). With a
+    changing wind the best heading isn't always into the start-time wind, so try a
+    straight out-and-back of the target length on every `step_deg` heading under
+    the timed score and return the best. `default_bearing` (into the wind at the
+    start) wins any near-tie, so a steady wind seeds exactly as before.
+    """
+    def probe(brg):
+        reach = target_km / 2.0
+        n = max(2, int(reach))                    # ~1 km steps
+        out = [(lat, lng)] + [_destination(lat, lng, brg, reach * i / n)
+                              for i in range(1, n + 1)]
+        return timed_wind_score(out + out[-2::-1], field, speed_mph)[0]
+
+    best_brg, best = default_bearing, probe(default_bearing)
+    for k in range(int(360 / step_deg)):
+        brg = k * step_deg
+        s = probe(brg)
+        if s > best + tie:
+            best_brg, best = brg, s
+    return best_brg
+
+
+def _steady_field(wind: Wind) -> WindField:
+    """A one-point, one-hour field holding `wind` everywhere, all ride long."""
+    rad = math.radians(wind.direction_from_deg)
+    return WindField(points=[(0.0, 0.0)], hours=[0.0],
+                     u=[[wind.speed_mph * math.sin(rad)]],
+                     v=[[wind.speed_mph * math.cos(rad)]])
+
+
+def _hhmm(hours):
+    """1.92 -> '1:55'."""
+    m = round(hours * 60)
+    return f"{m // 60}:{m % 60:02d}"
+
+
+def _wind_phrase(mph, leg):
+    """'12 mph headwind out' / '6 mph tailwind home' / 'little wind home'."""
+    if abs(mph) < 2.0:
+        return f"little wind {leg}"
+    return f"{abs(mph):.0f} mph {'headwind' if mph > 0 else 'tailwind'} {leg}"
+
+
+def wind_summary(c: Candidate) -> str:
+    """What the wind does on this route, e.g. '9 mph headwind out, 7 mph tailwind
+    home' — computed from the wind you'll meet, so it stays true when it changes."""
+    return f"{_wind_phrase(c.head_out_mph, 'out')}, {_wind_phrase(c.head_back_mph, 'home')}"
+
+
+def wind_verdict(c: Candidate) -> str:
+    """Short label for a route's wind line (cards / candidate table)."""
+    if c.wind_score > 0.2:
+        return "into wind first" if c.head_out_mph >= 0 else "tailwind first"
+    if c.wind_score < -0.2:
+        return "wind against"
+    return "neutral"
 
 
 # Busy-road penalty: a small free band (unavoidable arterial crossings/connectors
@@ -256,7 +422,7 @@ def _gravel_seek_reward(unpaved_frac, lo, hi):
 
 def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
              tolerance_km: float = 0.0, weights: "RouteWeights" = None,
-             busy_baseline: float = 0.0):
+             busy_baseline: float = 0.0, speed_mph: float = DEFAULT_RIDE_SPEED_MPH):
     """Score every candidate and return them sorted best-first.
 
     `tolerance_km` is a free buffer: a route whose length is within this many km
@@ -276,17 +442,32 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
     `weights` (a `RouteWeights`, default the grid-farmland baseline = today's
     constants) lets the caller pass an archetype-tuned set; `None` reproduces
     current behaviour exactly.
+
+    When the wind carries a `field` (hourly wind over the ride area), the wind
+    term is timed: each route is ridden at `speed_mph` and scored on the wind it
+    meets where and when it gets there (`timed_wind_score`). Without a field the
+    start-time wind is assumed to hold for the whole ride, as before.
     """
     w = weights or weights_for(None, ride_type)
     into = wind.into_wind_bearing
     for c in candidates:
-        if wind.known:
-            c.wind_score = wind_score(c.score_coords or c.coords, into)
+        geom = c.score_coords or c.coords
+        if wind.known and wind.field is not None:
+            c.wind_score, c.head_out_mph, c.head_back_mph, c.ride_hours = timed_wind_score(
+                geom, wind.field, speed_mph,
+                _route_offset_km(c.coords, c.score_coords))
+            wind_norm = (c.wind_score + 2.0) / 4.0       # -> ~0..1
+        elif wind.known:
+            c.wind_score = wind_score(geom, into)
+            # steady wind: the same score as a single-point, single-hour field
+            _, c.head_out_mph, c.head_back_mph, c.ride_hours = timed_wind_score(
+                geom, _steady_field(wind), speed_mph)
             wind_norm = (c.wind_score + 2.0) / 4.0       # -> ~0..1
         else:
             # No forecast available (planner notes it): make the wind term a
             # constant so it doesn't bias direction — rank on the other signals.
-            c.wind_score = 0.0
+            c.wind_score = c.head_out_mph = c.head_back_mph = 0.0
+            c.ride_hours = _polyline_km(geom) / (max(1.0, speed_mph) * _MPH_TO_KMH)
             wind_norm = 0.5
 
         # `surface_score` is the display figure (paved on road / unpaved on gravel);
@@ -318,7 +499,6 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
         # Tidiness: count self-crossings on the scored geometry (the loop, for
         # staging) and penalize them per km beyond a small free band, so a tangled
         # round_trip loop loses to a clean one.
-        geom = c.score_coords or c.coords
         c.self_intersections = _self_intersections(geom)
         tidy_penalty = -max(0.0, c.self_intersections / max(_polyline_km(geom), 1.0)
                             - w.tidy_free_per_km)
@@ -333,13 +513,13 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
 def explain(best: Candidate, wind: Wind, ride_type: str) -> str:
     """One-line human rationale for why this route was chosen."""
     bits = [best.shape]
-    if best.wind_score > 0.2:
-        bits.append(f"heads out into the {compass_label(wind.direction_from_deg)} "
-                    f"wind, tailwind home")
+    if not wind.known:
+        bits.append("no wind forecast")
     elif best.wind_score < -0.2:
-        bits.append("wind line is compromised (no good option for this loop shape today)")
+        bits.append(f"wind line is compromised ({wind_summary(best)}; no good "
+                    f"option for this loop shape today)")
     else:
-        bits.append("wind is roughly neutral around the loop")
+        bits.append(wind_summary(best))
     if ride_type == "gravel":
         gq = (f", {best.good_gravel_frac * 100:.0f}% good" if best.good_gravel_frac else "")
         bits.append(f"{best.unpaved_frac * 100:.0f}% unpaved{gq}")
@@ -423,10 +603,9 @@ def _route_difference(a: Candidate, b: Candidate) -> float:
 def _option_reasons(c: Candidate, wind: Wind, ride_type: str, lead: str = None):
     """Human bullet points for an option: the axis it leads on first, then a few
     short supporting facts (skipping whichever axis we just led with). Pure text."""
-    cl = compass_label(wind.direction_from_deg)
     reasons = []
     if lead == "wind":
-        reasons.append(f"strongest wind line - out into the {cl} wind, tailwind home "
+        reasons.append(f"strongest wind line - {wind_summary(c)} "
                        f"(wind score {c.wind_score:+.2f})")
     elif lead == "quiet":
         reasons.append("quietest - least time on busy highways / long path runs")
@@ -437,15 +616,19 @@ def _option_reasons(c: Candidate, wind: Wind, ride_type: str, lead: str = None):
     elif lead == "variety":
         reasons.append(f"a different option - a {c.shape}, {c.distance_km:.1f} km")
     else:                                       # the recommendation: lead with the wind verdict
-        if c.wind_score > 0.2:
-            reasons.append(f"rides into the {cl} wind first, tailwind home")
+        if not wind.known:
+            reasons.append("balanced pick; no wind forecast available")
+        elif c.wind_score > 0.2:
+            reasons.append(f"good wind line: {wind_summary(c)}")
         elif c.wind_score < -0.2:
-            reasons.append("best available, though the wind line is compromised today")
+            reasons.append(f"best available, though the wind line is compromised "
+                           f"today ({wind_summary(c)})")
         else:
-            reasons.append("balanced pick; wind is roughly neutral around the loop")
+            reasons.append(f"balanced pick; wind is roughly neutral ({wind_summary(c)})")
 
     if lead != "distance":
-        reasons.append(f"{c.distance_km:.1f} km, +{c.ascent_m:.0f} m")
+        reasons.append(f"{c.distance_km:.1f} km, +{c.ascent_m:.0f} m"
+                       + (f", ~{_hhmm(c.ride_hours)} at your pace" if c.ride_hours else ""))
     if ride_type == "gravel":
         gq = (f" ({c.good_gravel_frac * 100:.0f}% good)" if c.good_gravel_frac else "")
         reasons.append(f"{c.unpaved_frac * 100:.0f}% unpaved{gq}")

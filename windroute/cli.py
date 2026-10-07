@@ -55,6 +55,11 @@ def plan(
     tolerance: float = typer.Option(3.0, "--tolerance", "-t",
                                     help="Acceptable +/- distance buffer (same unit as -d)."),
     unit: str = typer.Option("mi", "--unit", help="'mi' or 'km'."),
+    speed: float = typer.Option(
+        16.0, "--speed",
+        help="Your usual pace in still air (mph, or km/h with --unit km). You're "
+             "modeled slower into headwinds and faster with tailwinds; this times "
+             "the ride so routes are scored on the wind you'll meet as it changes."),
     start: str = typer.Option("now", "--start", "-s",
                               help="'YYYY-MM-DD HH:MM' or 'now'."),
     ride_type: str = typer.Option("road", "--ride-type", "-r", help="'road' or 'gravel'."),
@@ -112,7 +117,8 @@ def plan(
                 ride_type=ride_type, shapes=shapes, surface_source=surface_source,
                 ride_area=ride_area, tolerance=tolerance, candidates=candidates,
                 corrections=corrections, corrections_file=corrections_file,
-                api_key=api_key, n_alternatives=2, classify=classify, refine=refine)
+                api_key=api_key, n_alternatives=2, classify=classify, refine=refine,
+                speed=speed)
 
         wind, label, when = result.wind, result.location_label, result.when
         mode = result.surface_mode
@@ -773,8 +779,8 @@ def _wind_panel(wind, label, when):
             f"Wind from [bold]{engine.compass_label(wind.direction_from_deg)}[/] "
             f"({wind.direction_from_deg:.0f}\u00b0) at "
             f"[bold]{wind.speed_mph:.0f} mph[/], gusting {wind.gust_mph:.0f}\n"
-            f"[dim]Ride out toward {engine.compass_label(wind.direction_from_deg)} "
-            f"to take the headwind while fresh.[/]")
+            f"[dim]Routes are scored on the wind you'll meet along the way "
+            f"(see the notes if it changes during the ride).[/]")
     return Panel(body, title="[bold cyan]Wind", border_style="cyan")
 
 
@@ -804,9 +810,10 @@ def _candidates_table(ranked, ride_type, compare=False, show_lane=False):
     t.add_column("Cross", justify="right")            # self-intersections (tangle)
     t.add_column("Score", justify="right")
     for i, c in enumerate(ranked, 1):
-        wind_cell = ("[green]into wind 1st[/]" if c.wind_score > 0.2
-                     else "[red]wind against[/]" if c.wind_score < -0.2
-                     else "neutral")
+        verdict = engine.wind_verdict(c)
+        wind_cell = (f"[green]{verdict}[/]" if c.wind_score > 0.2
+                     else f"[red]{verdict}[/]" if c.wind_score < -0.2
+                     else verdict)
         style = "bold green" if i == 1 else ""
         row = [str(i), c.shape, f"{c.distance_km:.1f}", f"{c.ascent_m:.0f}", wind_cell]
         if compare:

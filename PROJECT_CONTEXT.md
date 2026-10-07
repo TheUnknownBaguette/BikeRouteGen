@@ -387,6 +387,28 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
 - **Self-healing `run.bat`:** builds the venv on first run and detects + rebuilds one that
   was synced from another machine (a venv bakes in the creating Python's absolute path, so
   OneDrive-synced copies can't run). Web-only users need only Python + an ORS key.
+- **Changing-wind scoring (Oct 2026):** routes are scored on the wind you'll MEET, not the
+  wind when you leave. `get_wind(..., radius_km=target)` makes ONE multi-location
+  Open-Meteo request (start + a ring of 6 points at ~1/3 the ride distance) and attaches a
+  `WindField` (hourly, -1..+12 h; space = inverse-distance, time = linear, interpolated as
+  u/v vectors so 350°→10° doesn't swing through south). `timed_wind_score` walks each route
+  at the rider's still-air pace (`--speed` / web "Average speed", default 16, in the
+  distance unit per hour), slowed/sped by the wind: ground speed = pace -
+  `WIND_SPEED_EFFECT` (0.25) * headwind, clamped to 0.5-1.6x pace (calibrated to the
+  owner's "20 mi out in ~1:15 into it, back in under an hour" = ~18 mph pace in ~10 mph
+  wind; milder than constant-power physics because riders push harder into the wind).
+  So the clock, and the wind met later, depends on the wind met earlier. It scores `((headwind out - headwind back) - WIND_NET_WEIGHT *
+  net headwind) / mean wind met`. In a steady wind a closed loop's net headwind is ~0, so
+  this equals the classic `wind_score` (tested); when the wind dies or shifts, the net term
+  flips the pick (e.g. tailwind out, calm home). `WIND_NET_WEIGHT = 4` sets the break-even:
+  into-wind-first still wins while the wind holds at >= 1/3 of its strength for the ride
+  home. Candidates are aimed by `best_aim_bearing` (24 headings probed with a synthetic
+  out-and-back; the start-time into-wind bearing wins near-ties, so steady winds seed
+  exactly as before). Staging loops start their clock after the transit leg. NWS fallback
+  gives a start-point-only (time, no space) field. Cards/CLI now say what the wind does
+  ("9 mph headwind out, 7 mph tailwind home") and a note fires when the forecast changes
+  >= 5 mph, or turns >= 45° in a >= 8 mph wind, during the ride. `learn.py` still uses the
+  classic `wind_score` for past trips (single historical hour).
 
 ---
 

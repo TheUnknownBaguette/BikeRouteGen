@@ -1,12 +1,68 @@
 """Core data containers shared across windroute (no logic, no I/O)."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 
 # --------------------------------------------------------------------------- #
 # Data containers
 # --------------------------------------------------------------------------- #
+@dataclass
+class WindField:
+    """Hourly wind over the ride area, so scoring can use the wind you'll actually
+    meet at each point of the route at the time you get there (not just the wind
+    at the start when you leave).
+
+    Wind is stored as its FROM-vector components in mph (u = east, v = north of
+    the direction the wind comes from), which interpolate cleanly through the
+    360/0 wrap. `hours` are offsets from the ride start; `u[p][h]` / `v[p][h]` are
+    at `points[p]`, hour `hours[h]`. Space is inverse-distance weighted across the
+    sample points; time is linear between hours (clamped at the ends).
+    """
+    points: list                # [(lat, lng), ...] sample locations (start first)
+    hours: list                 # [float, ...] hours since ride start, ascending
+    u: list                     # [[mph, ...] per hour] per point
+    v: list
+
+    def vector_at(self, lat, lng, hours):
+        """(u, v) FROM-vector in mph at a place and time (hours since start)."""
+        # time: index bracket + linear weight (clamped outside the window)
+        hs = self.hours
+        if hours <= hs[0]:
+            i0 = i1 = 0
+            f = 0.0
+        elif hours >= hs[-1]:
+            i0 = i1 = len(hs) - 1
+            f = 0.0
+        else:
+            i1 = next(i for i, h in enumerate(hs) if h >= hours)
+            i0 = i1 - 1
+            f = (hours - hs[i0]) / (hs[i1] - hs[i0])
+        # space: inverse-distance weights (cheap flat-earth km; points are close)
+        coslat = math.cos(math.radians(lat))
+        dists = [math.hypot((plat - lat) * 111.0, (plng - lng) * 111.0 * coslat)
+                 for plat, plng in self.points]
+        near = min(range(len(dists)), key=dists.__getitem__)
+        if dists[near] < 0.05:                     # on a sample point: use it as-is
+            wts = [(near, 1.0)]
+        else:
+            wts = [(p, 1.0 / d ** 2) for p, d in enumerate(dists)]
+        tot = sum(w for _, w in wts)
+        u = v = 0.0
+        for p, w in wts:
+            up = self.u[p][i0] + f * (self.u[p][i1] - self.u[p][i0])
+            vp = self.v[p][i0] + f * (self.v[p][i1] - self.v[p][i0])
+            u += w * up
+            v += w * vp
+        return u / tot, v / tot
+
+    def at(self, lat, lng, hours):
+        """(direction_from_deg, speed_mph) at a place and time."""
+        u, v = self.vector_at(lat, lng, hours)
+        return math.degrees(math.atan2(u, v)) % 360, math.hypot(u, v)
+
+
 @dataclass
 class Wind:
     direction_from_deg: float   # meteorological convention: direction wind comes FROM
@@ -16,6 +72,8 @@ class Wind:
     known: bool = True          # False when no forecast could be fetched (calm fallback);
                                 # `evaluate` then neutralizes the wind term so it doesn't
                                 # bias direction, and the planner adds a user-facing note.
+    field: WindField = None     # hourly wind over the ride area (None = assume this
+                                # single wind holds everywhere for the whole ride)
 
     @property
     def into_wind_bearing(self) -> float:
@@ -48,6 +106,11 @@ class Candidate:
     waypoints: list = None      # the routable (lat,lng) corners this route was built from
                                 # (loop/rectangle only) — the handle local-search refine nudges.
     wind_score: float = 0.0     # first-half headwind minus second-half headwind
+                                # (with a changing wind: minus a net-headwind penalty)
+    head_out_mph: float = 0.0   # mean headwind (+) / tailwind (-) met on the first half
+    head_back_mph: float = 0.0  # ... and on the second half, at your riding speed
+    ride_hours: float = 0.0     # time to ride the scored route at your pace, slowed by
+                                # headwinds / sped up by tailwinds (0 = not computed)
     surface_score: float = 0.0
     self_intersections: int = 0 # times the route crosses itself (tangle / messiness signal)
     total_score: float = 0.0

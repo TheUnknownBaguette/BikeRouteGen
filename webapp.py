@@ -109,7 +109,7 @@ def _security_headers(resp):
 # Defaults shown in the form (match the CLI's).
 FORM_DEFAULTS = {
     "location": "Chicago, IL", "distance": "30", "unit": "mi", "start": "now",
-    "ride_type": "road", "shapes": ["loop", "lollipop", "rectangle"],
+    "ride_type": "road", "speed": "16", "shapes": ["loop", "lollipop", "rectangle"],
     "surface_source": "ors", "ride_area": "", "tolerance": "3",
     "candidates": "12", "corrections": True, "classify": False, "refine": False,
 }
@@ -193,6 +193,7 @@ def plan():
             surface_source=f.get("surface_source", "ors"),
             ride_area=(f.get("ride_area", "").strip() or None),
             tolerance=_clamp(f.get("tolerance", 3), 0, 50, 3),
+            speed=_clamp(f.get("speed", 16), 3, 40, 16),
             candidates=int(_clamp(f.get("candidates", 12), 1, 20, 12)),
             corrections=("corrections" in f),
             classify=("classify" in f),
@@ -233,8 +234,7 @@ def plan():
         # Maps are now interactive (Leaflet, client-side from these coords), so no
         # server-side PNG is rendered for the web; the GPX is still written for download.
         render.write_gpx(c.coords, str(base.with_suffix(".gpx")), name=title)
-        verdict = ("into wind first" if c.wind_score > 0.2
-                   else "wind against" if c.wind_score < -0.2 else "neutral")
+        verdict = engine.wind_verdict(c)
         cards.append({
             "role": opt.role, "headline": opt.headline, "reasons": opt.reasons,
             "shape": c.shape, "dist_km": c.distance_km, "dist_mi": c.distance_km * to_mi,
@@ -255,8 +255,7 @@ def plan():
         "unrideable_pct": c.unrideable_frac * 100,
         "hwy_pct": c.busy_frac * 100, "path_pct": c.path_frac * 100,
         "cross": c.self_intersections, "score": c.total_score,
-        "verdict": ("into wind" if c.wind_score > 0.2
-                    else "against" if c.wind_score < -0.2 else "neutral"),
+        "verdict": engine.wind_verdict(c),
     } for c in result.ranked]
 
     wind = result.wind

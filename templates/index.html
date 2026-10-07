@@ -115,6 +115,13 @@
 
       <div class="grid" style="margin-top:18px">
         <div class="field" style="margin-bottom:0">
+          <label for="speed">Average speed
+            <span class="help" tabindex="0"
+                  aria-label="Your usual pace in still air, in mph or km/h to match your distance unit. You're modeled a bit slower into a headwind and faster with a tailwind, which times the ride so routes are scored on the wind you'll actually meet as it changes."
+                  data-tip="Your usual pace in still air, in mph or km/h to match your distance unit. You're modeled a bit slower into a headwind and faster with a tailwind, which times the ride so routes are scored on the wind you'll actually meet as it changes.">i</span></label>
+          <input type="number" id="speed" name="speed" value="{{ d.speed }}" step="any" min="3" max="40">
+        </div>
+        <div class="field" style="margin-bottom:0">
           <label for="tolerance">Distance tolerance
             <span class="help" tabindex="0"
                   aria-label="How far over or under your target distance is OK with no penalty, in your chosen unit. Routes within this band are not docked for length."

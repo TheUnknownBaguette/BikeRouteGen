@@ -45,12 +45,16 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
                 shapes=("loop", "lollipop", "rectangle"), surface_source="ors",
                 ride_area=None, tolerance=3.0, candidates=12, corrections=True,
                 corrections_file=None, api_key=None, n_alternatives=2,
-                location_label=None, classify=False, refine=False) -> PlanResult:
+                location_label=None, classify=False, refine=False,
+                speed=None) -> PlanResult:
     """Run the full planning pipeline and return a `PlanResult` (no printing/files).
 
     `shapes` may be a comma string ("loop,rectangle") or a sequence. `start` is
-    "now" or a parseable date string. Raises on hard failures (bad location, no
-    routes, missing API key) for the front-end to surface.
+    "now" or a parseable date string. `speed` is your still-air pace in `unit`s
+    per hour (default 16 mph; slowed by headwinds, sped up by tailwinds): it times
+    the ride so each route is scored on the wind it meets along the way. Raises
+    on hard failures (bad location, no routes, missing API key) for the front-end
+    to surface.
     """
     ride_type = ride_type.lower().strip()
     if isinstance(shapes, str):
@@ -60,6 +64,8 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
     to_km = 1.609344 if unit.lower().startswith("mi") else 1.0
     target_km = distance * to_km
     tolerance_km = tolerance * to_km
+    speed_mph = (speed * to_km / 1.609344 if speed
+                 else engine.DEFAULT_RIDE_SPEED_MPH)
     when = (dt.datetime.now().replace(minute=0, second=0, microsecond=0)
             if str(start).lower() == "now" else dateparser.parse(start))
 
@@ -67,11 +73,15 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
     lat, lng, label = engine.geocode(location)
     if location_label:                    # caller picked an exact point; keep its name
         label = location_label
-    wind = engine.get_wind(lat, lng, when)
+    wind = engine.get_wind(lat, lng, when, radius_km=target_km)
     if not wind.known:
         notes.append("wind: couldn't fetch a forecast for this location — planned "
                      "without a wind line (routes ranked on surface, traffic, and "
                      "shape).")
+    elif wind.field is not None:
+        note = _wind_change_note(wind, lat, lng, when, target_km / (speed_mph * 1.609344))
+        if note:
+            notes.append(note)
 
     # Step 0 (Task 1): classify the surrounding terrain so later steps can adapt.
     # Off by default and DELIBERATELY does not feed scoring/zone weights yet — that
@@ -112,10 +122,23 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
         if zone:
             shape_list = shape_list + ["staging"]
 
+    # Aim the candidates where the forecast wind is best ridden: into the wind
+    # when it holds, but e.g. tailwind-out when it's going to die before you'd
+    # turn for home. A steady wind aims exactly into it, as before.
+    aim = wind.into_wind_bearing
+    if wind.known and wind.field is not None:
+        aim = engine.best_aim_bearing(wind.field, lat, lng, target_km, speed_mph,
+                                      wind.into_wind_bearing)
+        if abs((aim - wind.into_wind_bearing + 180) % 360 - 180) >= 45:
+            notes.append(f"wind: the forecast changes enough during the ride that "
+                         f"heading {engine.compass_label(aim)} first works better "
+                         f"than straight into the current "
+                         f"{engine.compass_label(wind.direction_from_deg)} wind.")
+
     ors_start = engine.ors_call_total()           # count this plan's routing calls (Task C2)
     cands = engine.generate_candidates(
         lat, lng, target_km, ride_type, api_key, n=candidates,
-        shapes=shape_list, into_wind_bearing=wind.into_wind_bearing, zone=zone,
+        shapes=shape_list, into_wind_bearing=aim, zone=zone,
         loop_geom=loop_geom)
 
     mode = surface_source.lower()
@@ -165,7 +188,8 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
                          f"quietest available rather than penalizing all routes.")
 
     ranked = engine.evaluate(cands, wind, ride_type, target_km, tolerance_km,
-                             weights=weights, busy_baseline=busy_baseline)
+                             weights=weights, busy_baseline=busy_baseline,
+                             speed_mph=speed_mph)
 
     # Local-search refinement (Task 6): squeeze more score out of the top few
     # candidates by nudging their corners and re-routing, keeping moves that raise
@@ -175,13 +199,15 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
         note = _refine_candidates(
             cands, ranked, api_key=api_key, ride_type=ride_type, wind=wind,
             target_km=target_km, tolerance_km=tolerance_km, weights=weights,
-            busy_baseline=busy_baseline, osm_src=osm_src, corr_cache=corr_cache)
+            busy_baseline=busy_baseline, osm_src=osm_src, corr_cache=corr_cache,
+            speed_mph=speed_mph)
         if note:
             notes.append(note)
         if classify and cands:                   # refined geometry can shift the floor
             busy_baseline = min(c.busy_frac for c in cands)
         ranked = engine.evaluate(cands, wind, ride_type, target_km, tolerance_km,
-                                 weights=weights, busy_baseline=busy_baseline)
+                                 weights=weights, busy_baseline=busy_baseline,
+                                 speed_mph=speed_mph)
 
     options = engine.select_route_options(ranked, wind, ride_type, target_km,
                                           n_alternatives=n_alternatives)
@@ -194,6 +220,28 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
 # --------------------------------------------------------------------------- #
 # Pipeline steps (moved from cli.py; return note strings instead of printing)
 # --------------------------------------------------------------------------- #
+# A forecast change worth telling the rider about over the ride window.
+WIND_CHANGE_MPH = 5.0
+WIND_CHANGE_DEG = 45.0
+WIND_SHIFT_MIN_MPH = 8.0      # a direction change only matters in a real wind
+
+
+def _wind_change_note(wind, lat, lng, when, ride_hours):
+    """'wind: forecast changes during your ~2 h ride: 14 mph SW -> 4 mph W ...'
+    when the start-point wind shifts or drops noticeably over the ride, else ""."""
+    d0, s0 = wind.field.at(lat, lng, 0.0)
+    d1, s1 = wind.field.at(lat, lng, ride_hours)
+    turned = abs((d1 - d0 + 180) % 360 - 180)
+    if abs(s1 - s0) < WIND_CHANGE_MPH and (turned < WIND_CHANGE_DEG
+                                           or max(s0, s1) < WIND_SHIFT_MIN_MPH):
+        return ""
+    end = when + dt.timedelta(hours=ride_hours)
+    return (f"wind: forecast changes during your ~{ride_hours:.1f} h ride - "
+            f"{s0:.0f} mph {engine.compass_label(d0)} at {when:%H:%M} -> "
+            f"{s1:.0f} mph {engine.compass_label(d1)} by {end:%H:%M}; routes are "
+            f"scored on the wind you'll meet along the way.")
+
+
 def _resolve_ride_area(ride_area, lat, lng, target_km, archetype=None):
     """Turn the --ride-area value into a staging zone dict + a status note.
 
@@ -334,7 +382,8 @@ REFINE_CALLS_EACH = 5
 
 
 def _refine_candidates(cands, ranked, *, api_key, ride_type, wind, target_km,
-                       tolerance_km, weights, busy_baseline, osm_src, corr_cache):
+                       tolerance_km, weights, busy_baseline, osm_src, corr_cache,
+                       speed_mph=engine.DEFAULT_RIDE_SPEED_MPH):
     """Local-search refine the top few candidates in place (work-plan Task 6).
 
     Builds a full-objective `score_fn` — the SAME OSM overlays + corrections + scoring
@@ -359,7 +408,8 @@ def _refine_candidates(cands, ranked, *, api_key, ride_type, wind, target_km,
         if corr_cache is not None:
             corr_cache.apply(c)
         engine.evaluate([c], wind, ride_type, target_km, tolerance_km,
-                        weights=weights, busy_baseline=busy_baseline)
+                        weights=weights, busy_baseline=busy_baseline,
+                        speed_mph=speed_mph)
         return c.total_score
 
     refinable = [c for c in ranked if c.waypoints][:REFINE_TOP]
