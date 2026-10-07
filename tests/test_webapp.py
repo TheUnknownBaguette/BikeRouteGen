@@ -82,6 +82,47 @@ def test_results_show_every_candidate_and_round_trip_edit():
         (webapp.planner.plan_routes, render.write_gpx) = orig
 
 
+def test_payload_carries_wind_field_and_share_fields():
+    """The page payload has what the route wind arrows + share links need: the
+    hourly field, the plan's start time and pace, and the card fields."""
+    import json, re
+    from windroute.models import WindField
+    orig = (webapp.planner.plan_routes, render.write_gpx)
+    res = _fake_result()
+    res.wind.field = WindField(points=[(41.5, -87.85)], hours=[-1.0, 0.0, 1.0, 2.0],
+                               u=[[1.0, 2.0, 3.0, 4.0]], v=[[5.0, 6.0, 7.0, 8.0]])
+    for c in res.ranked:
+        c.ride_hours = 1.5
+    webapp.planner.plan_routes = lambda **kw: res
+    render.write_gpx = lambda *a, **k: None
+    try:
+        r = webapp.app.test_client().post("/plan", data={"location": "Mokena, IL",
+                                                          "distance": "25", "unit": "mi"})
+        html = r.data.decode()
+        payload = json.loads(re.search(r'id="route-data">(.*?)</script>', html, re.S).group(1))
+        assert payload["field"]["hours"] == [-1.0, 0.0, 1.0, 2.0]
+        assert payload["plan"]["start"] == "2026-06-15T08:00"
+        assert [t["h"] for t in payload["plan"]["timeline"]] == [0.0, 1.0, 2.0]
+        assert html.count('class="tl"') == 3
+        assert payload["plan"]["pace_mph"] == 17.0                # default pace, in mph
+        card = payload["routes"][0]["card"]
+        assert card["headline"] == "Top pick" and card["ride_time"] == "1:30"
+        assert set(webapp.SHARED_CARD_FIELDS) <= set(card)
+        assert 'id="share-btn"' in html and "data-wind-toggle" in html
+    finally:
+        (webapp.planner.plan_routes, render.write_gpx) = orig
+
+
+def test_share_page_and_tile_hosts_allowed():
+    client = webapp.app.test_client()
+    r = client.get("/share")
+    assert r.status_code == 200 and b'id="share-root"' in r.data
+    csp = r.headers["Content-Security-Policy"]
+    for host in ("tile.openstreetmap.org", "tile-cyclosm.openstreetmap.fr",
+                 "tile.opentopomap.org"):
+        assert host in csp
+
+
 def test_card_reasons_use_plan_unit():
     out = webapp._card_reasons(["a different option - a loop, 45.1 km",
                                 "45.1 km, +108 m, ~1:40 at your pace",

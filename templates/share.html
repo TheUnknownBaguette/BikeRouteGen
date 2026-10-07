@@ -1,0 +1,41 @@
+{% extends "app.html" %}
+{# A shared plan: the routes travel in the link's #fragment, so nothing is stored
+   or sent to the server — share.js decodes it and fills this page in. #}
+{% block title %}windroute — shared routes{% endblock %}
+{% block panel_label %}Shared routes{% endblock %}
+{% block head_actions %}
+  <a class="btn sm primary" href="/">Plan your own</a>
+{% endblock %}
+
+{% block panel %}
+  <div id="share-root" class="stack">
+    <div class="sec-head">
+      <p class="eyebrow" style="margin-bottom:6px">Shared routes</p>
+      <h1 class="title" id="sh-title">Loading…</h1>
+      <p class="lede" id="sh-lede"></p>
+      <div id="sh-wind"></div>
+      <div id="sh-timeline"></div>
+    </div>
+    <div class="section sec-picks">
+      <div class="eyebrow">Routes <span class="count" id="sh-count"></span></div>
+      <div class="routes carousel" id="sh-routes"></div>
+    </div>
+    <p class="disclaimer">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+      <span>The wind shown is the forecast from when these routes were planned. Check the
+        route and current conditions before you ride. <a href="{{ url_for('about') }}">About &amp; safety</a></span>
+    </p>
+  </div>
+  <div id="share-error" class="err" hidden>This share link is incomplete or damaged — ask for it again, or
+    <a href="/">plan your own ride</a>.</div>
+{% endblock %}
+
+{% block stage %}
+  {% include "_stage.html" %}
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='share.js', v=asset_v) }}"></script>
+  <script src="{{ url_for('static', filename='wind.js', v=asset_v) }}"></script>
+  <script src="{{ url_for('static', filename='map.js', v=asset_v) }}"></script>
+{% endblock %}

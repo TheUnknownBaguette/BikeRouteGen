@@ -102,7 +102,8 @@ def _security_headers(resp):
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     resp.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "img-src 'self' data: https://tile.openstreetmap.org; "
+        "img-src 'self' data: https://tile.openstreetmap.org "
+        "https://*.tile-cyclosm.openstreetmap.fr https://*.tile.opentopomap.org; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
@@ -276,11 +277,14 @@ def plan():
             "gpx": f"{base.name}.gpx", "dlname": f"{dlnames[i]}.gpx",
         })
         meta = [f"{dist_num} {unit}", ride_time, f"+{c.ascent_m:.0f} m", wind_line]
+        card = routes[-1]
         map_routes.append({
             "id": i, "color": color, "pick": role != "candidate", "title": headline,
             "meta": " · ".join(x for x in meta if x),
             "coords": [[round(lat, 5), round(lng, 5)] for lat, lng in c.coords],
             "eles": [round(e) for e in c.eles] if c.eles else [],
+            # the card's own fields, so a shared link can redraw it with no server
+            "card": {k: card[k] for k in SHARED_CARD_FIELDS},
         })
 
     # "Edit plan" goes back to the form with exactly these inputs.
@@ -293,22 +297,56 @@ def plan():
     if result.region is not None:              # terrain archetype as the first note
         notes = [result.region.note] + notes
     valid = _parse_iso(wind.valid_time)
+    wind_ctx = {"from": engine.compass_label(wind.direction_from_deg),
+                "deg": round(wind.direction_from_deg), "mph": round(wind.speed_mph, 1),
+                "gust": round(wind.gust_mph, 1), "known": wind.known,
+                "when": _clock(valid) if valid else wind.valid_time}
+    when_str = f"{result.when:%a %b} {result.when.day}, {_clock(result.when)}"
+    timeline = _wind_timeline(result, order)
+    # Everything the map (and a share link) needs, as one JSON blob in the page.
+    payload = {
+        "unit": unit, "ride_type": ride_type,
+        "plan": {"label": result.location_label, "when": when_str, "meta": meta,
+                 "start": result.when.isoformat(timespec="minutes"),
+                 "pace_mph": round(pace if unit == "mi" else pace / 1.609344, 2),
+                 "wind": wind_ctx, "timeline": timeline},
+        "field": _field_json(wind),
+        "routes": map_routes,
+    }
     return render_template(
-        "results.html", label=result.location_label,
-        when_str=f"{result.when:%a %b} {result.when.day}, {_clock(result.when)}",
-        meta=meta, unit=unit, ride_type=ride_type,
-        wind={"from": engine.compass_label(wind.direction_from_deg),
-              "deg": wind.direction_from_deg, "mph": wind.speed_mph,
-              "gust": wind.gust_mph, "known": wind.known,
-              "when": _clock(valid) if valid else wind.valid_time},
-        timeline=_wind_timeline(result, order), notes=notes, routes=routes,
-        map_routes=map_routes, edit_url="/?" + urlencode(edit_pairs))
+        "results.html", label=result.location_label, when_str=when_str,
+        meta=meta, unit=unit, ride_type=ride_type, wind=wind_ctx,
+        timeline=timeline, notes=notes, routes=routes,
+        payload=payload, edit_url="/?" + urlencode(edit_pairs))
+
+
+@app.route("/share")
+def share():
+    """A shared plan. The routes live in the link's #fragment (never sent to the
+    server); the page decodes and draws them client-side."""
+    return render_template("share.html")
 
 
 # Route colors: the recommended route + alternatives (distinct and readable on the
 # muted map in light and dark), then one shared color for the other candidates.
 ROUTE_COLORS = ["#2563eb", "#ea580c", "#0d9488", "#c026d3"]
 CANDIDATE_COLOR = "#7c3aed"
+# Card fields carried in the page payload (and so in share links).
+SHARED_CARD_FIELDS = ("role", "headline", "rank", "shape", "dist", "climb", "ride_time",
+                      "verdict", "wind_score", "wind_line", "reasons", "gravel_pct",
+                      "hwy_pct", "lane_pct", "unrideable_pct", "dlname")
+
+
+def _field_json(wind):
+    """The hourly wind field for the map's wind animation (small: ~7 points x ~14
+    hours), or None without a forecast."""
+    f = wind.field
+    if not (wind.known and f is not None):
+        return None
+    return {"points": [[round(a, 4), round(b, 4)] for a, b in f.points],
+            "hours": [round(h, 3) for h in f.hours],
+            "u": [[round(x, 2) for x in row] for row in f.u],
+            "v": [[round(x, 2) for x in row] for row in f.v]}
 
 
 _KM_RE = re.compile(r"(\d+(?:\.\d+)?) km\b")
@@ -349,8 +387,9 @@ def _wind_timeline(result, order):
     for h in range(hours + 1):
         t = base + dt.timedelta(hours=h)
         deg, mph = wind.field.at(lat, lng, (t - result.when).total_seconds() / 3600)
-        out.append({"time": _clock(t).replace(":00", ""), "deg": deg, "mph": mph,
-                    "from": engine.compass_label(deg)})
+        out.append({"time": _clock(t).replace(":00", ""), "deg": round(deg),
+                    "mph": round(mph, 1), "from": engine.compass_label(deg),
+                    "h": round((t - result.when).total_seconds() / 3600, 3)})
     return out
 
 

@@ -387,6 +387,29 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
 - **Self-healing `run.bat`:** builds the venv on first run and detects + rebuilds one that
   was synced from another machine (a venv bakes in the creating Python's absolute path, so
   OneDrive-synced copies can't run). Web-only users need only Python + an ORS key.
+- **Map-first web UI (Oct 2026):** `templates/app.html` is a full-height shell (side panel /
+  phone bottom sheet + Leaflet map); `static/style.css` holds all styles (light + dark tokens).
+  Results put every ranked candidate on the map with a card + GPX; select via card, line,
+  table, ↑/↓ or the phone carousel. The page payload (`#route-data` JSON) carries routes,
+  card fields, the plan header and the wind field. Extras:
+  - **Basemaps** (`map.js` `BASEMAPS`, all keyless): Map (muted OSM, inverted in dark mode),
+    Cycling (CyclOSM — bike infra on the map), Topo (OpenTopoMap); choice in localStorage.
+    CARTO was tried and dropped: its tiles now return "API KEY REQUIRED". New tile hosts
+    must also be added to the CSP `img-src` in `webapp.py`.
+  - **Wind along the route** (`static/wind.js` + `map.js` `drawWind`): the selected route is
+    ridden in the browser through the same `WindField` (IDW + linear time, ported to JS) at
+    the rider's pace (`plan.pace_mph`), with the scorer's ground-speed model
+    (`WIND_SPEED_EFFECT`/clamps duplicated in wind.js — keep them in sync). Every ~2 mi
+    section gets a badge: arrow = where the wind blows then, color = how it hits you
+    (head / cross / tail by headwind share of wind speed, |cos| 0.38 cutoff; calm < 3 mph),
+    tooltip with mile, time, speed. The same effect is drawn as a strip under the elevation
+    profile, and the profile hover reads it out. (An earlier full-map particle animation was
+    replaced by this at the owner's request: they want the wind per section of the route.)
+  - **Share links** (`static/share.js`, `/share`): top picks (+ the selected route) are
+    Douglas-Peucker thinned (4 m), delta-encoded, deflated (CompressionStream) and base64url'd
+    into the `#fragment` — no server storage, never expires, server never sees the route.
+    ~5 KB for 3 routes. Shared pages build GPX in the browser as a blob: link (an
+    `<a download>` isn't CSP-gated; scripts can't fetch() it back under `default-src 'self'`).
 - **Changing-wind scoring (Oct 2026):** routes are scored on the wind you'll MEET, not the
   wind when you leave. `get_wind(..., radius_km=target)` makes ONE multi-location
   Open-Meteo request (start + a ring of 6 points at ~1/3 the ride distance) and attaches a

@@ -1,0 +1,26 @@
+{# Map overlays shared by the results page and a shared-link page. #}
+<div class="overlay glass layer-tog">
+  <div class="seg" role="group" aria-label="Routes shown on the map">
+    <label class="seg-opt"><input type="radio" name="layers" value="picks" checked><span>Top picks</span></label>
+    <label class="seg-opt"><input type="radio" name="layers" value="all"><span>All routes</span></label>
+  </div>
+  <button type="button" class="wind-tog" data-wind-toggle aria-pressed="true" title="Show the wind you'll meet along the route">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 8h10a3 3 0 1 0-3-3M3 13h15a3 3 0 1 1-3 3M3 18h7"/></svg>
+    Wind</button>
+</div>
+<div class="overlay glass elev-card" id="elev-card">
+  <div class="hd">
+    <span class="dot" id="elev-dot"></span>
+    <span class="name" id="elev-name">Route</span>
+    <span class="meta" id="elev-meta"></span>
+  </div>
+  <div class="elev" id="elev"></div>
+  <div class="legend">
+    <span><i style="background:#16a34a"></i>start / finish</span>
+    <span>› direction of travel</span>
+    <span id="legend-wind">wind when you get there:
+      <b style="color:#dc2626">■</b> head <b style="color:#d97706">■</b> cross <b style="color:#16a34a">■</b> tail</span>
+    <span>click the map for Street View · ↑ ↓ to switch routes</span>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>

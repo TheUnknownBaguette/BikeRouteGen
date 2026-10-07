@@ -6,13 +6,30 @@
 //    compare table, or arrow keys; swiping the carousel on phones) highlights it,
 //    fits the map to it, adds direction-of-travel arrows, and shows its elevation
 //    profile — hovering the profile tracks the point on the map.
+//  - Wind along the selected route: a badge per section (~2 mi) with an arrow for
+//    where the wind is blowing when you get there, colored by how it hits you
+//    (head / cross / tail), plus the same as a strip under the elevation profile.
+//  - Shared link (/share#...): the same view, decoded from the link by share.js.
 (function () {
   if (typeof L === "undefined") return;                 // Leaflet failed to load
   var mapEl = document.getElementById("map");
   if (!mapEl) return;
 
-  var TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-  var ATTRIB = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+  // Basemaps (all keyless): a clean muted OSM map (inverted into a dark map in
+  // dark mode), CyclOSM — bike lanes, paths and surfaces drawn right on the map —
+  // and OpenTopoMap for terrain. The choice is remembered per browser.
+  var OSM_ATTRIB = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+  var BASEMAPS = {
+    map: { label: "Map", url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+           opts: { maxZoom: 19, attribution: OSM_ATTRIB } },
+    cycling: { label: "Cycling", url: "https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png",
+           opts: { maxZoom: 20, subdomains: "abc", attribution: OSM_ATTRIB +
+             ' · <a href="https://www.cyclosm.org">CyclOSM</a> hosted by <a href="https://openstreetmap.fr">OSM France</a>' } },
+    topo: { label: "Topo", url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+           opts: { maxZoom: 17, subdomains: "abc", attribution: OSM_ATTRIB +
+             ' · <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)' } }
+  };
+  var BASE_KEY = "windroute:basemap";
   var LAST_KEY = "windroute:last-start";
 
   function store(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} }
@@ -21,7 +38,35 @@
   function makeMap(zoomPos) {
     var map = L.map(mapEl, { zoomControl: false, scrollWheelZoom: true });
     L.control.zoom({ position: zoomPos }).addTo(map);
-    L.tileLayer(TILE_URL, { maxZoom: 19, attribution: ATTRIB }).addTo(map);
+    var current = BASEMAPS[load(BASE_KEY)] ? load(BASE_KEY) : "map";
+    var layer = null, buttons = {};
+    function use(key) {
+      if (layer) map.removeLayer(layer);
+      var b = BASEMAPS[key];
+      layer = L.tileLayer(b.url, b.opts).addTo(map);
+      mapEl.setAttribute("data-basemap", key);
+      Object.keys(buttons).forEach(function (k) { buttons[k].setAttribute("aria-pressed", k === key ? "true" : "false"); });
+      current = key;
+      store(BASE_KEY, key);
+    }
+    var Switcher = L.Control.extend({
+      onAdd: function () {
+        var box = L.DomUtil.create("div", "basemaps glass");
+        box.setAttribute("role", "group");
+        box.setAttribute("aria-label", "Map style");
+        Object.keys(BASEMAPS).forEach(function (k) {
+          var btn = L.DomUtil.create("button", "", box);
+          btn.type = "button";
+          btn.textContent = BASEMAPS[k].label;
+          L.DomEvent.on(btn, "click", function (e) { L.DomEvent.stop(e); use(k); });
+          buttons[k] = btn;
+        });
+        L.DomEvent.disableClickPropagation(box);
+        return box;
+      }
+    });
+    new Switcher({ position: zoomPos }).addTo(map);
+    use(current);
     return map;
   }
   function startPin(latlng) {
@@ -38,7 +83,22 @@
   }
 
   var dataEl = document.getElementById("route-data");
-  if (dataEl) results(); else planForm();
+  if (dataEl) {
+    var payload;
+    try { payload = JSON.parse(dataEl.textContent || "{}"); } catch (e) { payload = null; }
+    if (payload) results(payload, 0);
+  } else if (document.getElementById("share-root")) {
+    if (!window.wrShare) return;
+    // a different share link pasted into the same tab only changes the #fragment
+    window.addEventListener("hashchange", function () { location.reload(); });
+    window.wrShare.decode(location.hash).then(function (p) {
+      window.wrShare.renderPanel(p);
+      results(p, p.selected);
+    }).catch(function () {
+      window.wrShare.showError();
+      makeMap("topleft").setView([39.5, -96], 4);
+    });
+  } else planForm();
 
   // ======================================================== plan form
   function planForm() {
@@ -76,9 +136,7 @@
   }
 
   // ======================================================== results
-  function results() {
-    var payload;
-    try { payload = JSON.parse(dataEl.textContent || "{}"); } catch (e) { return; }
+  function results(payload, firstId) {
     var routes = payload.routes || [];
     if (!routes.length) return;
     var unitMi = payload.unit !== "km";
@@ -86,6 +144,11 @@
     var mobile = window.matchMedia("(max-width: 900px)");
     var showAll = false, selected = -1;
     var arrows = L.layerGroup().addTo(map);
+    var windMarks = L.layerGroup().addTo(map);
+    var Wr = window.WrWind, field = payload.field, plan = payload.plan || {};
+    var hasWind = !!(Wr && field && field.points && field.points.length);
+    var windOn = hasWind;
+    var t0 = plan.start ? new Date(plan.start) : null;
     var hoverPin = null;
 
     // per-route cumulative distance (km) for the profile + arrows
@@ -155,13 +218,111 @@
         var a = r.coords[j - 1], b = r.coords[j];
         var deg = bearing(a, b);
         L.marker(b, { interactive: false, keyboard: false, icon: L.divIcon({
-          className: "dir-arrow", iconSize: [16, 16], iconAnchor: [8, 8],
-          html: '<svg viewBox="0 0 16 16" style="transform:rotate(' + deg.toFixed(0) + 'deg)">' +
-            '<circle cx="8" cy="8" r="7.5" fill="' + r.color + '"/>' +
-            '<path d="M4.8 9.6 8 5.4l3.2 4.2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' }) })
+          // a small white chevron sitting on the line, pointing the way you ride
+          className: "dir-arrow", iconSize: [14, 14], iconAnchor: [7, 7],
+          html: '<svg viewBox="0 0 14 14" style="transform:rotate(' + deg.toFixed(0) + 'deg)">' +
+            '<path d="M3.5 9 7 5.5 10.5 9" fill="none" stroke="' + r.color + '" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>' +
+            '<path d="M3.5 9 7 5.5 10.5 9" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' }) })
           .addTo(arrows);
       }
     }
+
+    // ---- wind along the route ----
+    function clock(h) {
+      if (!t0 || isNaN(t0)) return "+" + h.toFixed(1) + " h";
+      var d = new Date(t0.getTime() + h * 3600e3), hh = d.getHours(), mm = d.getMinutes();
+      return (hh % 12 || 12) + ":" + (mm < 10 ? "0" : "") + mm + " " + (hh < 12 ? "AM" : "PM");
+    }
+    function windFor(r) {                         // ride it once, cache on the route
+      if (!r.wind) r.wind = Wr.rideWind(r.coords, field, plan.pace_mph);
+      return r.wind.seg;
+    }
+    // Distance-weighted wind over segments [i0, i1): mean vector, headwind, time.
+    function sectionWind(r, i0, i1) {
+      var seg = windFor(r), u = 0, v = 0, hw = 0, w = 0;
+      for (var i = i0; i < i1; i++) {
+        var d = r.cum[i + 1] - r.cum[i];
+        u += seg[i].u * d; v += seg[i].v * d; hw += seg[i].hw * d; w += d;
+      }
+      if (!w) return null;
+      u /= w; v /= w; hw /= w;
+      var mph = Math.hypot(u, v);
+      return { u: u, v: v, hw: hw, mph: mph, eff: Wr.effect(hw, mph),
+               t: seg[Math.min(seg.length - 1, (i0 + i1) >> 1)].t };
+    }
+    function drawWind(r) {
+      windMarks.clearLayers();
+      if (!hasWind || !windOn) return;
+      var total = r.cum[r.cum.length - 1];
+      if (!total) return;
+      var n = Math.max(6, Math.min(18, Math.round(total / 3.2)));   // ~2 mi sections
+      var i0 = 0;
+      for (var k = 0; k < n; k++) {
+        var end = total * (k + 1) / n, i1 = i0;
+        while (i1 < r.cum.length - 1 && r.cum[i1 + 1] <= end) i1++;
+        if (i1 <= i0) continue;
+        var sw = sectionWind(r, i0, i1);
+        var midKm = (r.cum[i0] + r.cum[i1]) / 2, m = i0;
+        while (m < i1 && r.cum[m] < midKm) m++;
+        if (sw) {
+          var from = Wr.fromDeg(sw.u, sw.v), col = Wr.COLORS[sw.eff];
+          var dist = unitMi ? midKm * 0.621371 : midKm;
+          var tip = "<b>" + (unitMi ? "Mile " : "Km ") + dist.toFixed(1) + " · ~" + clock(sw.t) + "</b><br>" +
+            Math.round(sw.mph) + " mph from " + Wr.compass(from) + "<br>" +
+            (sw.eff === "calm" ? "about calm" : sw.eff === "cross"
+              ? Math.round(Math.abs(sw.hw)) + " mph along you · mostly crosswind"
+              : Math.round(Math.abs(sw.hw)) + " mph " + Wr.LABELS[sw.eff]);
+          L.marker(r.coords[m], { keyboard: false, zIndexOffset: 500, icon: L.divIcon({
+            // a slim flat wind arrow (points where the wind blows), colored by how
+            // it hits you, with a thin white halo so it reads on any basemap
+            className: "wind-mark", iconSize: [28, 28], iconAnchor: [14, 14],
+            html: '<svg viewBox="0 0 24 24" aria-hidden="true"><g transform="rotate(' + ((from + 180) % 360).toFixed(0) + ' 12 12)">' +
+              '<path d="M12 2.5 17 11 13.3 9.6V21.5h-2.6V9.6L7 11Z" fill="' + col + '" stroke="#fff" stroke-width="1.4" stroke-linejoin="round" paint-order="stroke"/>' +
+              '</g></svg>' }) })
+            .bindTooltip(tip, { direction: "top", offset: [0, -10], opacity: 0.95 })
+            .addTo(windMarks);
+        }
+        i0 = i1;
+      }
+    }
+    // smoothed per-segment wind effect for the strip under the profile
+    function windStrip(r, X, y, h) {
+      if (!hasWind || !windOn) return "";
+      var seg = windFor(r), cum = r.cum, n = seg.length, win = 0.25;   // ±0.25 km
+      var pre = [0], preM = [0];
+      for (var i = 0; i < n; i++) {
+        var d = cum[i + 1] - cum[i];
+        pre.push(pre[i] + seg[i].hw * d); preM.push(preM[i] + seg[i].mph * d);
+      }
+      var out = "", runEff = null, runX = 0, a = 0, b = 0;
+      for (i = 0; i <= n; i++) {
+        var eff = null;
+        if (i < n) {
+          var c = (cum[i] + cum[i + 1]) / 2;
+          while (a < n && cum[a + 1] < c - win) a++;
+          while (b < n && cum[b] < c + win) b++;
+          var span = cum[b] - cum[a] || 1;
+          eff = Wr.effect((pre[b] - pre[a]) / span, (preM[b] - preM[a]) / span);
+        }
+        if (eff !== runEff) {
+          if (runEff) out += '<rect x="' + runX.toFixed(1) + '" y="' + y + '" width="' + Math.max(0.5, X(cum[i]) - runX).toFixed(1) +
+            '" height="' + h + '" fill="' + Wr.COLORS[runEff] + '"/>';
+          runEff = eff; runX = X(cum[i]);
+        }
+      }
+      return out;
+    }
+    document.querySelectorAll("[data-wind-toggle]").forEach(function (btn) {
+      if (!hasWind) { btn.hidden = true; return; }
+      btn.addEventListener("click", function () {
+        windOn = !windOn;
+        btn.setAttribute("aria-pressed", windOn ? "true" : "false");
+        var r = routes[selected];
+        if (r) { drawWind(r); renderProfile(r); }
+      });
+    });
+    var legendWind = document.getElementById("legend-wind");
+    if (legendWind) legendWind.hidden = !hasWind;
 
     function fitTo(r) {
       var bounds = r.line.getBounds();
@@ -177,8 +338,10 @@
       var r = routes[id];
       if (!r) return;
       selected = id;
+      window.wrState = { payload: payload, selected: id };     // read by the Share button
       styleAll();
       drawArrows(r);
+      drawWind(r);
       if (!opts.noFit) fitTo(r);
       cards.forEach(function (c) { c.classList.toggle("active", +c.getAttribute("data-route") === id); });
       rows.forEach(function (c) { c.classList.toggle("active", +c.getAttribute("data-route") === id); });
@@ -265,7 +428,7 @@
       }
       var H = mobile.matches ? 64 : 96;
       var W = Math.max(260, Math.round(elevEl.clientWidth || 600));
-      var padL = 34, padR = 8, padT = 6, padB = 16;
+      var padL = 34, padR = 8, padT = 6, padB = hasWind && windOn ? 24 : 16;
       var total = r.cum[r.cum.length - 1] || 1;
       var ev = smooth(eles, Math.max(3, Math.round(eles.length / 90)));
       var lo = Math.min.apply(null, ev), hi = Math.max.apply(null, ev);
@@ -286,6 +449,7 @@
         '<path d="' + area + '" fill="url(#' + gid + ')"/>' +
         '<path d="' + d + '" fill="none" stroke="' + r.color + '" stroke-width="2" stroke-linejoin="round"/>' +
         '<line x1="' + padL + '" y1="' + base + '" x2="' + (W - padR) + '" y2="' + base + '" style="stroke:var(--line-2)"/>' +
+        windStrip(r, X, base + 2, 5) +
         '<text x="' + (padL - 5) + '" y="' + (Y(hi) + 4).toFixed(1) + '" font-size="10" text-anchor="end" style="fill:var(--faint)">' + Math.round(hi) + '</text>' +
         '<text x="' + (padL - 5) + '" y="' + (base).toFixed(1) + '" font-size="10" text-anchor="end" style="fill:var(--faint)">' + Math.round(Math.min.apply(null, ev)) + ' m</text>' +
         '<text x="' + padL + '" y="' + (H - 3) + '" font-size="10" style="fill:var(--faint)">0</text>' +
@@ -312,7 +476,13 @@
         hl.setAttribute("x1", px); hl.setAttribute("x2", px);
         hc.setAttribute("cx", px); hc.setAttribute("cy", py);
         var dist = unitMi ? r.cum[k] * 0.621371 : r.cum[k];
-        ht.textContent = Math.round(eles[k]) + " m · " + dist.toFixed(1) + (unitMi ? " mi" : " km");
+        var txt = Math.round(eles[k]) + " m · " + dist.toFixed(1) + (unitMi ? " mi" : " km");
+        if (hasWind && windOn) {
+          var sw = sectionWind(r, Math.max(0, k - 3), Math.min(r.coords.length - 1, k + 3));
+          if (sw) txt += " · ~" + clock(sw.t) + " · " + (sw.eff === "calm" ? "calm" :
+            Math.round(sw.eff === "cross" ? sw.mph : Math.abs(sw.hw)) + " mph " + Wr.LABELS[sw.eff]);
+        }
+        ht.textContent = txt;
         var right = px > W * 0.7;
         ht.setAttribute("x", right ? px - 8 : px + 8);
         ht.setAttribute("text-anchor", right ? "end" : "start");
@@ -326,7 +496,10 @@
         var pin = hoverPin.getElement && hoverPin.getElement();
         if (pin && pin.firstChild) pin.firstChild.style.setProperty("--c", r.color);
       }
-      function out() { g.style.display = "none"; if (hoverPin) map.removeLayer(hoverPin); }
+      function out() {
+        g.style.display = "none";
+        if (hoverPin) map.removeLayer(hoverPin);
+      }
       svgEl.addEventListener("mousemove", function (e) { at(e.clientX); });
       svgEl.addEventListener("mouseleave", out);
       svgEl.addEventListener("touchmove", function (e) { if (e.touches[0]) at(e.touches[0].clientX); }, { passive: true });
@@ -339,9 +512,9 @@
       resizeT = setTimeout(function () { map.invalidateSize(); if (routes[selected]) renderProfile(routes[selected]); }, 150);
     });
 
-    // initial view: everything, then settle on the top pick
+    // initial view: everything, then settle on the chosen route
     var all = L.featureGroup(routes.filter(function (r) { return r.pick; }).map(function (r) { return r.line; }));
     map.fitBounds(all.getBounds(), { padding: [40, 40] });
-    select(0, { instant: true });
+    select(routes[firstId] ? firstId : 0, { instant: true });
   }
 })();

@@ -2,6 +2,9 @@
 {% block title %}windroute — {{ label }}{% endblock %}
 {% block panel_label %}Routes{% endblock %}
 {% block head_actions %}
+  <button type="button" class="btn sm" id="share-btn" title="Copy a link to these routes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>
+    Share</button>
   <a class="btn sm" href="{{ edit_url }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
     Edit plan</a>
@@ -64,7 +67,7 @@
     </div>
   </div>
   {% if timeline %}
-    <div class="eyebrow">Wind during your ride</div>
+    <div class="eyebrow">Wind at the start, hour by hour</div>
     <div class="timeline">
       {% for t in timeline %}
         <div class="tl" title="{{ '%.0f'|format(t.mph) }} mph from {{ t.from }} at {{ t.time }}">
@@ -135,35 +138,12 @@
 {% endblock %}
 
 {% block stage %}
-  <div class="overlay glass layer-tog">
-    <div class="seg" role="group" aria-label="Routes shown on the map">
-      <label class="seg-opt"><input type="radio" name="layers" value="picks" checked><span>Top picks</span></label>
-      <label class="seg-opt"><input type="radio" name="layers" value="all"><span>All routes</span></label>
-    </div>
-  </div>
-  {% if wind.known %}
-    <div class="overlay glass wind-badge" title="Wind at the start: {{ '%.0f'|format(wind.mph) }} mph from {{ wind.from }}">
-      <svg viewBox="0 0 30 30" aria-hidden="true"><g transform="rotate({{ wind.deg }} 15 15)"><line x1="15" y1="4" x2="15" y2="21" stroke-width="2.6" stroke-linecap="round" style="stroke:var(--brand)"/><path d="M15 27 l-5 -7 h10 z" style="fill:var(--brand)"/></g></svg>
-      <span>{{ '%.0f'|format(wind.mph) }} mph<br><span class="muted" style="font-weight:600">from {{ wind.from }}</span></span>
-    </div>
-  {% endif %}
-  <div class="overlay glass elev-card" id="elev-card">
-    <div class="hd">
-      <span class="dot" id="elev-dot"></span>
-      <span class="name" id="elev-name">Route</span>
-      <span class="meta" id="elev-meta"></span>
-    </div>
-    <div class="elev" id="elev"></div>
-    <div class="legend">
-      <span><i style="background:#16a34a"></i>start / finish</span>
-      <span>› direction of travel</span>
-      <span>click the map for Street View · ↑ ↓ to switch routes</span>
-    </div>
-  </div>
-
-  <script type="application/json" id="route-data">{{ {"unit": unit, "routes": map_routes} | tojson }}</script>
+  {% include "_stage.html" %}
+  <script type="application/json" id="route-data">{{ payload | tojson }}</script>
 {% endblock %}
 
 {% block scripts %}
+  <script src="{{ url_for('static', filename='share.js', v=asset_v) }}"></script>
+  <script src="{{ url_for('static', filename='wind.js', v=asset_v) }}"></script>
   <script src="{{ url_for('static', filename='map.js', v=asset_v) }}"></script>
 {% endblock %}
