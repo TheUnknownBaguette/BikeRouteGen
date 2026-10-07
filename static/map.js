@@ -103,6 +103,8 @@
   // ======================================================== plan form
   function planForm() {
     var map = makeMap("topright");
+    // the location field biases its suggestions toward the area on the map
+    window.wrMapCenter = function () { return map.getCenter(); };
     var marker = null;
     var tip = document.getElementById("map-tip");
     var loc = document.getElementById("location");

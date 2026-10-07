@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import re
 
+import time
+
 import requests
 
 
@@ -23,29 +25,74 @@ _US_STATES = {
 }
 
 
-def geocode(place: str):
+ADDRESS_NOT_FOUND = ("Couldn't find that address. Pick one of the suggestions as you "
+                     "type, or click the map to drop your start exactly where you'll "
+                     "roll out.")
+
+
+def house_number(place: str):
+    """The leading house number of an address ("233 S Wacker Dr" -> "233"), or None."""
+    m = re.match(r"\s*(\d+[A-Za-z]?)\s+\S", place or "")
+    return m.group(1) if m else None
+
+
+def missing_house_number(place: str, label: str):
+    """The typed house number when the geocoded `label` doesn't carry it (the
+    address resolved only to its street, so the start is approximate), else None."""
+    num = house_number(place)
+    if num and not re.match(rf"\s*{re.escape(num)}\b", label or "", re.I):
+        return num
+    return None
+
+
+def geocode(place: str, near=None):
     """Return (lat, lng, label) for a location string.
 
     Accepts three forms, picked automatically so you can start a ride from an
     exact spot (e.g. the corner near your house that reaches the bike path),
     not just a town centroid:
       1. Raw coordinates ``"41.5358,-87.8890"`` -> used directly (most precise).
-      2. A street address ``"233 S Wacker Dr, Chicago, IL"`` -> OSM Nominatim, which
-         resolves house numbers / streets (Open-Meteo only knows town centroids).
+      2. A street address ``"233 S Wacker Dr, Chicago, IL"`` -> Photon (biased toward
+         `near` = (lat, lng), the area on the rider's map, so "233 S Wacker" with no
+         town still lands in Chicago), then OSM Nominatim.
       3. A town / "City, ST" name -> Open-Meteo (fast), falling back to Nominatim.
+
+    An address that starts with a house number never falls back to a town-name
+    match (that once turned "233 S Wacker" into the town of Wacker, IL, 150 km
+    away). If only the street is found, its point is returned — the caller can
+    tell with `missing_house_number` and say the start is approximate.
     """
     coords = _parse_coords(place)
     if coords:
         lat, lng = coords
         return lat, lng, f"{lat:.5f}, {lng:.5f}"
 
-    # Anything with a digit (house number, route number, ZIP) is address-like and
-    # belongs to Nominatim first; plain town names go to the faster Open-Meteo.
+    # Anything with a digit (house number, route number, ZIP) is address-like.
     if any(ch.isdigit() for ch in place):
+        num = house_number(place)
+        bias = None
+        if near is not None:
+            try:
+                bias = (round(float(near[0]), 2), round(float(near[1]), 2))
+            except (TypeError, ValueError, IndexError):
+                bias = None
+        street_only = None
+        for item in _suggest_photon(place, 5, bias):
+            if not num or not missing_house_number(place, item["label"]):
+                return item["lat"], item["lng"], item["label"]
+            street_only = street_only or item
         try:
-            return _geocode_nominatim(place)
+            hit = _geocode_nominatim(place)
+            if not num or not missing_house_number(place, hit[2]):
+                return hit
+            street_only = street_only or {"lat": hit[0], "lng": hit[1], "label": hit[2]}
         except (ValueError, requests.RequestException):
-            pass                                   # fall through to town geocoder
+            pass
+        if street_only:                            # the street, but not the number
+            return street_only["lat"], street_only["lng"], street_only["label"]
+        if num:
+            raise ValueError(ADDRESS_NOT_FOUND)     # never guess a town for an address
+        # e.g. "Mokena 60448": no house number, so a town match is fine below
 
     try:
         return _geocode_openmeteo(place)
@@ -130,7 +177,7 @@ def _geocode_openmeteo(place: str):
     return top["latitude"], top["longitude"], label
 
 
-def suggest_places(query: str, count: int = 6):
+def suggest_places(query: str, count: int = 6, near=None):
     """Type-ahead suggestions for a partial query — street addresses AND towns.
 
     Backs the web form's location autocomplete. Primary source is Photon
@@ -139,19 +186,49 @@ def suggest_places(query: str, count: int = 6):
     forbids per-keystroke queries, or Open-Meteo, which only knows town centroids.
     Falls back to Open-Meteo town search if Photon is unavailable. Returns a list of
     ``{"label", "lat", "lng"}``; never raises (returns [] on any problem).
+
+    `near` = (lat, lng) biases Photon toward that area (the map the rider is looking
+    at), so "Mok" finds Mokena before Mokpo — the right place shows up in fewer
+    keystrokes. Results are cached briefly (typing, backspacing and retyping repeat
+    the same prefixes, and the public Photon instance can take 1-3 s per query).
     """
     q = (query or "").strip()
     if len(q) < 2:
         return []
-    items = _suggest_photon(q, count)
-    return items if items else _suggest_openmeteo(q, count)
+    bias = None
+    if near is not None:
+        try:
+            bias = (round(float(near[0]), 1), round(float(near[1]), 1))   # ~10 km cells
+        except (TypeError, ValueError, IndexError):
+            bias = None
+    key = (q.lower(), count, bias)
+    hit = _SUGGEST_CACHE.get(key)
+    if hit is not None and time.time() - hit[0] < SUGGEST_TTL_S:
+        return hit[1]
+    items = _suggest_photon(q, count, bias)
+    if not items:
+        items = _suggest_openmeteo(q, count)
+    if items:                                   # don't cache an outage
+        if len(_SUGGEST_CACHE) >= SUGGEST_CACHE_MAX:
+            _SUGGEST_CACHE.pop(next(iter(_SUGGEST_CACHE)))      # drop the oldest
+        _SUGGEST_CACHE[key] = (time.time(), items)
+    return items
 
 
-def _suggest_photon(query: str, count: int):
-    """Address + place suggestions from Photon (GeoJSON). [] on failure."""
+SUGGEST_TTL_S = 15 * 60
+SUGGEST_CACHE_MAX = 2000
+_SUGGEST_CACHE: dict = {}                       # insertion-ordered: oldest first
+
+
+def _suggest_photon(query: str, count: int, bias=None):
+    """Address + place suggestions from Photon (GeoJSON), optionally biased toward
+    `bias` = (lat, lng). [] on failure."""
+    params = {"q": query, "limit": count, "lang": "en"}
+    if bias:
+        params.update(lat=bias[0], lon=bias[1])
     try:
-        r = requests.get(PHOTON_URL, params={"q": query, "limit": count, "lang": "en"},
-                         headers={"User-Agent": USER_AGENT}, timeout=8)
+        r = requests.get(PHOTON_URL, params=params,
+                         headers={"User-Agent": USER_AGENT}, timeout=5)
         r.raise_for_status()
         features = r.json().get("features") or []
     except (requests.RequestException, ValueError):

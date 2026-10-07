@@ -169,8 +169,26 @@ def about():
 def suggest():
     """Type-ahead place suggestions for the location field (JSON). Same-origin
     proxy to the geocoder so the page's strict CSP can stay default-src 'self'."""
-    items = engine.suggest_places(request.args.get("q", "")[:80], count=6)
-    return jsonify(items)
+    near = None
+    try:                                       # bias toward the area on the map
+        near = (float(request.args["lat"]), float(request.args["lng"]))
+        if not (-90 <= near[0] <= 90 and -180 <= near[1] <= 180):
+            near = None
+    except (KeyError, ValueError):
+        pass
+    items = engine.suggest_places(request.args.get("q", "")[:80], count=6, near=near)
+    resp = jsonify(items)
+    resp.headers["Cache-Control"] = "private, max-age=600"   # retyping = instant
+    return resp
+
+
+def _form_near(f):
+    """(lat, lng) of the area on the form's map when Plan was pressed, or None."""
+    try:
+        lat, lng = float(f.get("near_lat", "")), float(f.get("near_lng", ""))
+    except ValueError:
+        return None
+    return (lat, lng) if -90 <= lat <= 90 and -180 <= lng <= 180 else None
 
 
 def _reshow(f, shapes, error, status):
@@ -222,6 +240,7 @@ def plan():
             refine=("refine" in f),
             api_key=os.environ.get("ORS_API_KEY"),
             n_alternatives=2,
+            near=_form_near(f),
         )
     except (ValueError, RuntimeError) as exc:      # expected: bad location, no key, no routes…
         # These carry user-friendly text from the planner; safe to show.
@@ -293,7 +312,9 @@ def plan():
     dist = _clamp(f.get("distance", 0), 1, 200, 30)
     meta = (f"{dist:g} {unit} {ride_type} · "
             f"{pace:g} {'km/h' if unit == 'km' else 'mph'} pace")
-    notes = result.notes
+    # an approximate start is a warning the rider must see, not a collapsed note
+    warnings = [n for n in result.notes if n.startswith("start:")]
+    notes = [n for n in result.notes if not n.startswith("start:")]
     if result.region is not None:              # terrain archetype as the first note
         notes = [result.region.note] + notes
     valid = _parse_iso(wind.valid_time)
@@ -316,7 +337,7 @@ def plan():
     return render_template(
         "results.html", label=result.location_label, when_str=when_str,
         meta=meta, unit=unit, ride_type=ride_type, wind=wind_ctx,
-        timeline=timeline, notes=notes, routes=routes,
+        timeline=timeline, notes=notes, warnings=warnings, routes=routes,
         payload=payload, edit_url="/?" + urlencode(edit_pairs))
 
 

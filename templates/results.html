@@ -80,6 +80,7 @@
     </div>
   {% endif %}
 
+  {% for w in warnings %}<div class="notice" role="alert">{{ w[6:]|trim }}</div>{% endfor %}
   {% if notes %}
     <details class="more section">
       <summary>

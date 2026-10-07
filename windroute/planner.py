@@ -46,13 +46,15 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
                 ride_area=None, tolerance=3.0, candidates=12, corrections=True,
                 corrections_file=None, api_key=None, n_alternatives=2,
                 location_label=None, classify=False, refine=False,
-                speed=None) -> PlanResult:
+                speed=None, near=None) -> PlanResult:
     """Run the full planning pipeline and return a `PlanResult` (no printing/files).
 
     `shapes` may be a comma string ("loop,rectangle") or a sequence. `start` is
     "now" or a parseable date string. `speed` is your still-air pace in `unit`s
     per hour (default 17 mph; slowed by headwinds, sped up by tailwinds): it times
-    the ride so each route is scored on the wind it meets along the way. Raises
+    the ride so each route is scored on the wind it meets along the way. `near`
+    = (lat, lng) of the area the rider was looking at, so a typed address with no
+    town ("233 S Wacker") resolves locally. Raises
     on hard failures (bad location, no routes, missing API key) for the front-end
     to surface.
     """
@@ -70,7 +72,12 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
             if str(start).lower() == "now" else dateparser.parse(start))
 
     notes: list = []
-    lat, lng, label = engine.geocode(location)
+    lat, lng, label = engine.geocode(location, near=near)
+    num = engine.missing_house_number(location, label)
+    if num and not location_label:
+        notes.append(f"start: couldn't find house number {num} on the map, so this "
+                     f"starts from {label.split(',')[0]} (approximate). For an exact "
+                     f"start, drop a pin on the map.")
     if location_label:                    # caller picked an exact point; keep its name
         label = location_label
     wind = engine.get_wind(lat, lng, when, radius_km=target_km)
