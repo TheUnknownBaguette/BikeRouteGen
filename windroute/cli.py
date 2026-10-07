@@ -56,7 +56,7 @@ def plan(
                                     help="Acceptable +/- distance buffer (same unit as -d)."),
     unit: str = typer.Option("mi", "--unit", help="'mi' or 'km'."),
     speed: float = typer.Option(
-        16.0, "--speed",
+        17.0, "--speed",
         help="Your usual pace in still air (mph, or km/h with --unit km). You're "
              "modeled slower into headwinds and faster with tailwinds; this times "
              "the ride so routes are scored on the wind you'll meet as it changes."),

@@ -12,19 +12,26 @@ OpenRouteService key from ORS_API_KEY, exactly like the CLI.
 """
 from __future__ import annotations
 
+import datetime as dt
 import logging
+import math
 import os
+import re
 import threading
 import time
 import uuid
 from collections import defaultdict
 from pathlib import Path
+from urllib.parse import urlencode
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from windroute import engine, render, planner
 
 app = Flask(__name__)
+# Cache-buster for our own CSS/JS: changes on every (re)start, i.e. every deploy, so
+# browsers never run a new page against a stale stylesheet or script.
+app.jinja_env.globals["asset_v"] = str(int(time.time()))
 # Reject oversized request bodies outright — the form is tiny.
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024
 
@@ -109,7 +116,7 @@ def _security_headers(resp):
 # Defaults shown in the form (match the CLI's).
 FORM_DEFAULTS = {
     "location": "Chicago, IL", "distance": "30", "unit": "mi", "start": "now",
-    "ride_type": "road", "speed": "16", "shapes": ["loop", "lollipop", "rectangle"],
+    "ride_type": "road", "speed": "17", "shapes": ["loop", "lollipop", "rectangle"],
     "surface_source": "ors", "ride_area": "", "tolerance": "3",
     "candidates": "12", "corrections": True, "classify": False, "refine": False,
 }
@@ -127,10 +134,29 @@ def _sweep_old_files():
             pass
 
 
+# Hidden fields that carry an exact picked start point through an "Edit plan" trip.
+PICKED_FIELDS = ("picked_lat", "picked_lng", "picked_label")
+CHECKBOXES = ("corrections", "classify", "refine")
+
+
+def _form_values(f):
+    """Form values from a submitted form or query string, over the defaults."""
+    vals = {**FORM_DEFAULTS, **{k: f.get(k, "") for k in FORM_DEFAULTS
+                                if k not in ("shapes",) + CHECKBOXES}}
+    vals["shapes"] = f.getlist("shapes") or FORM_DEFAULTS["shapes"]
+    for k in CHECKBOXES:
+        vals[k] = k in f
+    for k in PICKED_FIELDS:
+        vals[k] = f.get(k, "")
+    return vals
+
+
 @app.route("/")
 def index():
-    return render_template("index.html", d=FORM_DEFAULTS, all_shapes=ALL_SHAPES,
-                           error=None)
+    # "Edit plan" from a results page comes back here with the plan's inputs in
+    # the query string (?edit=1&...), so the form opens as you left it.
+    d = _form_values(request.args) if request.args.get("edit") else FORM_DEFAULTS
+    return render_template("index.html", d=d, all_shapes=ALL_SHAPES, error=None)
 
 
 @app.route("/about")
@@ -148,13 +174,8 @@ def suggest():
 
 def _reshow(f, shapes, error, status):
     """Re-render the form with the submitted values and a message."""
-    submitted = {**FORM_DEFAULTS, **{k: f.get(k, "") for k in FORM_DEFAULTS
-                                     if k not in ("shapes", "corrections", "classify",
-                                                  "refine")}}
+    submitted = _form_values(f)
     submitted["shapes"] = shapes
-    submitted["corrections"] = "corrections" in f
-    submitted["classify"] = "classify" in f
-    submitted["refine"] = "refine" in f
     return render_template("index.html", d=submitted, all_shapes=ALL_SHAPES,
                            error=error), status
 
@@ -193,7 +214,7 @@ def plan():
             surface_source=f.get("surface_source", "ors"),
             ride_area=(f.get("ride_area", "").strip() or None),
             tolerance=_clamp(f.get("tolerance", 3), 0, 50, 3),
-            speed=_clamp(f.get("speed", 16), 3, 40, 16),
+            speed=_clamp(f.get("speed", 17), 3, 40, 17),
             candidates=int(_clamp(f.get("candidates", 12), 1, 20, 12)),
             corrections=("corrections" in f),
             classify=("classify" in f),
@@ -217,60 +238,120 @@ def plan():
 
     _sweep_old_files()
     token = uuid.uuid4().hex[:8]
-    to_mi = 1.0 / 1.609344
     ride_type = f.get("ride_type", "road")
-    unit = f.get("unit", "mi")
-    # Descriptive download names (files are stored under an unguessable token to avoid
-    # collisions; the browser saves each GPX as e.g. jun14-30mi-loop-Swind.gpx).
+    unit = "km" if f.get("unit", "mi") == "km" else "mi"
+    per_unit = 1.0 if unit == "km" else 1.0 / 1.609344
+    wind = result.wind
+
+    # Every ranked candidate gets a card, a map line and a GPX: the recommended +
+    # alternatives first (each with its headline), then the rest in rank order.
+    option_of = {id(o.candidate): o for o in result.options}
+    order = ([o.candidate for o in result.options]
+             + [c for c in result.ranked if id(c) not in option_of])
+    rank_of = {id(c): i + 1 for i, c in enumerate(result.ranked)}
     dlnames = render.dedupe_names([
-        render.route_basename(result.when, o.candidate.distance_km, unit,
-                              o.candidate.shape, result.wind.direction_from_deg)
-        for o in result.options])
-    cards = []
-    for i, opt in enumerate(result.options):
-        c = opt.candidate
+        render.route_basename(result.when, c.distance_km, unit, c.shape,
+                              wind.direction_from_deg) for c in order])
+    routes, map_routes = [], []
+    for i, c in enumerate(order):
+        opt = option_of.get(id(c))
+        role = opt.role if opt else "candidate"
+        headline = opt.headline if opt else c.shape.capitalize()
+        color = ROUTE_COLORS[i] if opt and i < len(ROUTE_COLORS) else CANDIDATE_COLOR
         base = OUT_DIR / f"{token}-{i}"
-        title = f"{c.distance_km * to_mi:.0f} mi {ride_type} {c.shape} - {opt.headline}"
-        # Maps are now interactive (Leaflet, client-side from these coords), so no
-        # server-side PNG is rendered for the web; the GPX is still written for download.
+        dist_num = f"{c.distance_km * per_unit:.1f}"
+        title = f"{dist_num} {unit} {ride_type} {c.shape} - {headline}"
         render.write_gpx(c.coords, str(base.with_suffix(".gpx")), name=title)
-        verdict = engine.wind_verdict(c)
-        cards.append({
-            "role": opt.role, "headline": opt.headline, "reasons": opt.reasons,
-            "shape": c.shape, "dist_km": c.distance_km, "dist_mi": c.distance_km * to_mi,
-            "ascent_m": c.ascent_m, "verdict": verdict,
+        ride_time = engine.scoring._hhmm(c.ride_hours) if c.ride_hours else ""
+        wind_line = engine.wind_summary(c) if wind.known else "no wind forecast"
+        routes.append({
+            "id": i, "role": role, "headline": headline, "rank": rank_of.get(id(c), i + 1),
+            "color": color, "shape": c.shape, "dist": f"{dist_num} {unit}",
+            "dist_num": dist_num, "climb": f"{c.ascent_m:.0f} m", "ride_time": ride_time,
+            "verdict": engine.wind_verdict(c), "wind_score": c.wind_score,
+            "wind_line": wind_line, "reasons": _card_reasons(opt.reasons if opt else [], unit),
             "gravel_pct": c.unpaved_frac * 100, "hwy_pct": c.busy_frac * 100,
             "path_pct": c.path_frac * 100, "lane_pct": c.bikelane_frac * 100,
-            "good_gravel_pct": c.good_gravel_frac * 100,
-            "unrideable_pct": c.unrideable_frac * 100,
-            "cross": c.self_intersections,
-            "coords": [[round(lat, 5), round(lng, 5)] for lat, lng in c.coords],
-            "eles": [round(e) for e in c.eles] if c.eles else [],
+            "unrideable_pct": c.unrideable_frac * 100, "score": c.total_score,
             "gpx": f"{base.name}.gpx", "dlname": f"{dlnames[i]}.gpx",
         })
+        meta = [f"{dist_num} {unit}", ride_time, f"+{c.ascent_m:.0f} m", wind_line]
+        map_routes.append({
+            "id": i, "color": color, "pick": role != "candidate", "title": headline,
+            "meta": " · ".join(x for x in meta if x),
+            "coords": [[round(lat, 5), round(lng, 5)] for lat, lng in c.coords],
+            "eles": [round(e) for e in c.eles] if c.eles else [],
+        })
 
-    ranked_rows = [{
-        "shape": c.shape, "dist_mi": c.distance_km * to_mi, "dist_km": c.distance_km,
-        "ascent_m": c.ascent_m, "gravel_pct": c.unpaved_frac * 100,
-        "unrideable_pct": c.unrideable_frac * 100,
-        "hwy_pct": c.busy_frac * 100, "path_pct": c.path_frac * 100,
-        "cross": c.self_intersections, "score": c.total_score,
-        "verdict": engine.wind_verdict(c),
-    } for c in result.ranked]
-
-    wind = result.wind
-    wind_ctx = {
-        "from": engine.compass_label(wind.direction_from_deg),
-        "deg": wind.direction_from_deg, "mph": wind.speed_mph, "gust": wind.gust_mph,
-        "when": wind.valid_time.replace("T", " "),
-    }
-    # Surface the terrain archetype as a debug line above the other notes.
+    # "Edit plan" goes back to the form with exactly these inputs.
+    edit_pairs = [("edit", "1")] + list(f.items(multi=True))
+    pace = _clamp(f.get("speed", 17), 3, 40, 17)
+    dist = _clamp(f.get("distance", 0), 1, 200, 30)
+    meta = (f"{dist:g} {unit} {ride_type} · "
+            f"{pace:g} {'km/h' if unit == 'km' else 'mph'} pace")
     notes = result.notes
-    if result.region is not None:
+    if result.region is not None:              # terrain archetype as the first note
         notes = [result.region.note] + notes
-    return render_template("results.html", label=result.location_label,
-                           wind=wind_ctx, notes=notes, cards=cards,
-                           ranked=ranked_rows)
+    valid = _parse_iso(wind.valid_time)
+    return render_template(
+        "results.html", label=result.location_label,
+        when_str=f"{result.when:%a %b} {result.when.day}, {_clock(result.when)}",
+        meta=meta, unit=unit, ride_type=ride_type,
+        wind={"from": engine.compass_label(wind.direction_from_deg),
+              "deg": wind.direction_from_deg, "mph": wind.speed_mph,
+              "gust": wind.gust_mph, "known": wind.known,
+              "when": _clock(valid) if valid else wind.valid_time},
+        timeline=_wind_timeline(result, order), notes=notes, routes=routes,
+        map_routes=map_routes, edit_url="/?" + urlencode(edit_pairs))
+
+
+# Route colors: the recommended route + alternatives (distinct and readable on the
+# muted map in light and dark), then one shared color for the other candidates.
+ROUTE_COLORS = ["#2563eb", "#ea580c", "#0d9488", "#c026d3"]
+CANDIDATE_COLOR = "#7c3aed"
+
+
+_KM_RE = re.compile(r"(\d+(?:\.\d+)?) km\b")
+
+
+def _card_reasons(reasons, unit):
+    """Option bullets for a card: drop the 'N km, +M m, ~T' line (the card's stat
+    chips already show distance/climb/time) and put distances in the plan's unit."""
+    out = [r for r in reasons if not re.match(r"\d+(?:\.\d+)? km, \+", r)]
+    if unit == "mi":
+        out = [_KM_RE.sub(lambda m: f"{float(m.group(1)) / 1.609344:.1f} mi", r) for r in out]
+    return out
+
+
+def _clock(t):
+    """'6:00 AM' (no leading zero, portable across platforms)."""
+    return f"{t.hour % 12 or 12}:{t:%M} {'AM' if t.hour < 12 else 'PM'}"
+
+
+def _parse_iso(text):
+    try:
+        return dt.datetime.fromisoformat(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def _wind_timeline(result, order):
+    """Hourly wind at the start across the top pick's ride time:
+    [{time, deg, mph, from}, ...]. Empty without a forecast field."""
+    wind = result.wind
+    if not (wind.known and wind.field is not None and order):
+        return []
+    top = order[0]
+    hours = max(1, math.ceil(top.ride_hours or 1.0))
+    lat, lng = top.coords[0]
+    base = result.when.replace(minute=0, second=0, microsecond=0)
+    out = []
+    for h in range(hours + 1):
+        t = base + dt.timedelta(hours=h)
+        deg, mph = wind.field.at(lat, lng, (t - result.when).total_seconds() / 3600)
+        out.append({"time": _clock(t).replace(":00", ""), "deg": deg, "mph": mph,
+                    "from": engine.compass_label(deg)})
+    return out
 
 
 @app.route("/download/<path:name>")

@@ -392,7 +392,7 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   Open-Meteo request (start + a ring of 6 points at ~1/3 the ride distance) and attaches a
   `WindField` (hourly, -1..+12 h; space = inverse-distance, time = linear, interpolated as
   u/v vectors so 350°→10° doesn't swing through south). `timed_wind_score` walks each route
-  at the rider's still-air pace (`--speed` / web "Average speed", default 16, in the
+  at the rider's still-air pace (`--speed` / web "Average speed", default 17, in the
   distance unit per hour), slowed/sped by the wind: ground speed = pace -
   `WIND_SPEED_EFFECT` (0.25) * headwind, clamped to 0.5-1.6x pace (calibrated to the
   owner's "20 mi out in ~1:15 into it, back in under an hour" = ~18 mph pace in ~10 mph

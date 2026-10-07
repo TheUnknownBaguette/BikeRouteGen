@@ -51,7 +51,7 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
 
     `shapes` may be a comma string ("loop,rectangle") or a sequence. `start` is
     "now" or a parseable date string. `speed` is your still-air pace in `unit`s
-    per hour (default 16 mph; slowed by headwinds, sped up by tailwinds): it times
+    per hour (default 17 mph; slowed by headwinds, sped up by tailwinds): it times
     the ride so each route is scored on the wind it meets along the way. Raises
     on hard failures (bad location, no routes, missing API key) for the front-end
     to surface.

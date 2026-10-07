@@ -50,7 +50,7 @@ def wind_score(coords, into_wind_bearing) -> float:
 # wind first still wins as long as it holds at >= 1/3 of its strength for the ride
 # home (b/a > (W-2)/(W+2)); if it'll drop below that, tailwind-out wins.
 WIND_NET_WEIGHT = 4.0
-DEFAULT_RIDE_SPEED_MPH = 16.0
+DEFAULT_RIDE_SPEED_MPH = 17.0
 _MPH_TO_KMH = 1.609344
 
 

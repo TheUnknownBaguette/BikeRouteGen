@@ -1,143 +1,169 @@
-{% extends "base.html" %}
+{% extends "app.html" %}
 {% block title %}windroute — {{ label }}{% endblock %}
-{% block sub %}Routes for {{ label }} · {{ wind.when }}{% endblock %}
-{% block head %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet.css') }}">
+{% block panel_label %}Routes{% endblock %}
+{% block head_actions %}
+  <a class="btn sm" href="{{ edit_url }}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+    Edit plan</a>
 {% endblock %}
-{% block content %}
 
-  <div class="card wind-card">
-    <span class="compass" aria-hidden="true">
-      <svg width="60" height="60" viewBox="0 0 60 60">
-        <circle cx="30" cy="30" r="26" fill="#f1f5fc" stroke="#d7dfea"/>
-        <g stroke="#c2cddd" stroke-width="1.5" stroke-linecap="round">
-          <path d="M30 6v4M30 50v4M6 30h4M50 30h4"/>
-        </g>
-        <g transform="rotate({{ wind.deg }} 30 30)">
-          <line x1="30" y1="11" x2="30" y2="29" stroke="#2563eb" stroke-width="3" stroke-linecap="round"/>
-          <path d="M30 33 l-5 -8 h10 z" fill="#1d4ed8"/>
-        </g>
-      </svg>
-    </span>
-    <div style="flex:1; min-width:0">
-      <div style="font-weight:700; font-size:16.5px">Wind from {{ wind.from }} · {{ '%.0f'|format(wind.mph) }} mph
-        <span class="muted" style="font-weight:500">(gusts {{ '%.0f'|format(wind.gust) }})</span></div>
-      <div class="muted" style="font-size:14px">Head out toward {{ wind.from }} into the headwind while you’re
-        fresh — sail home with the tailwind.</div>
+{% macro route_card(r) -%}
+  <div class="rcard{{ ' compact' if r.role == 'candidate' }}" role="button" tabindex="0"
+       data-route="{{ r.id }}" style="--c: {{ r.color }}" aria-label="{{ r.headline }}, {{ r.dist }}">
+    <div class="top">
+      {% if r.role == 'recommended' %}<span class="badge rec">Top pick</span>{% endif %}
+      <span class="name">{{ r.headline }}</span>
+      <span class="rank">#{{ r.rank }}</span>
     </div>
-    <a class="back" href="/">← Plan another</a>
+    <div class="windline">{{ r.wind_line }}</div>
+    <div class="stats">
+      <span class="stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h18M3 12l4-4M3 12l4 4M21 12l-4-4M21 12l-4 4"/></svg>{{ r.dist }}</span>
+      {% if r.ride_time %}<span class="stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>{{ r.ride_time }}</span>{% endif %}
+      <span class="stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18l6-8 4 5 3-4 5 7z"/></svg>+{{ r.climb }}</span>
+      <span class="stat {{ 'good' if r.wind_score > 0.2 else 'bad' if r.wind_score < -0.2 }}">{{ r.verdict }}</span>
+      {% if r.gravel_pct >= 1 %}<span class="stat {{ 'good' if ride_type == 'gravel' }}">{{ '%.0f'|format(r.gravel_pct) }}% {{ 'unpaved' if ride_type == 'gravel' else 'gravel' }}</span>{% endif %}
+      {% if r.hwy_pct >= 5 %}<span class="stat warn">{{ '%.0f'|format(r.hwy_pct) }}% busy road</span>{% endif %}
+      {% if r.lane_pct >= 1 %}<span class="stat good">{{ '%.0f'|format(r.lane_pct) }}% bike lane</span>{% endif %}
+      {% if r.unrideable_pct > 0 %}<span class="stat bad">{{ '%.0f'|format(r.unrideable_pct) }}% unrideable</span>{% endif %}
+    </div>
+    {% if r.reasons %}<ul class="why">{% for x in r.reasons %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+    <div class="acts">
+      <a class="btn sm primary" href="{{ url_for('download', name=r.gpx) }}" download="{{ r.dlname }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+        Download GPX</a>
+    </div>
   </div>
+{%- endmacro %}
 
-  {% if notes %}
-    <div class="notes">
-      {% for n in notes %}<div>{{ n }}</div>{% endfor %}
+{% block panel %}
+  {# "Town, County, State, Country" -> big town + small rest; a dropped pin stays whole #}
+  {% set parts = label.split(', ') if not label[:1] in '-0123456789' else [label] %}
+  <div class="stack">
+  <div class="sec-head">
+  <h1 class="title">{{ parts[0] }}</h1>
+  <p class="lede">{% if parts|length > 1 %}{{ parts[1:]|join(', ') }}<br>{% endif %}{{ when_str }} · {{ meta }}</p>
+
+  <div class="wind">
+    <svg class="compass" viewBox="0 0 60 60" aria-hidden="true">
+      <circle cx="30" cy="30" r="27" style="fill:var(--surface);stroke:var(--line-2)"/>
+      <g stroke-width="1.5" stroke-linecap="round" style="stroke:var(--line-2)"><path d="M30 5v4M30 51v4M5 30h4M51 30h4"/></g>
+      <text x="30" y="17" text-anchor="middle" font-size="7.5" font-weight="700" style="fill:var(--faint)">N</text>
+      <g transform="rotate({{ wind.deg }} 30 30)">
+        <line x1="30" y1="12" x2="30" y2="40" stroke-width="3" stroke-linecap="round" style="stroke:var(--brand)"/>
+        <path d="M30 47 l-6 -9 h12 z" style="fill:var(--brand)"/>
+      </g>
+    </svg>
+    <div style="min-width:0">
+      {% if wind.known %}
+        <div class="big">{{ '%.0f'|format(wind.mph) }} mph from {{ wind.from }}</div>
+        <div class="sub">gusts {{ '%.0f'|format(wind.gust) }} mph · forecast for {{ wind.when }}</div>
+      {% else %}
+        <div class="big">No wind forecast</div>
+        <div class="sub">Routes ranked on surface, traffic and shape.</div>
+      {% endif %}
     </div>
-  {% endif %}
-
-  {% for c in cards %}
-    {% if c.role == 'recommended' %}
-      <div class="card opt rec">
-        <h3 class="opt-title" data-route="0" role="button" tabindex="0"
-            title="Open this route full screen">
-          <span class="badge rec">Recommended</span> <span class="opt-name">{{ c.headline }}</span>
-          <span class="expand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg> Expand</span>
-        </h3>
-        <div class="map" data-route="0" aria-label="interactive map of the recommended route"></div>
-        <p class="map-hint">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-          Drag to pan, scroll to zoom · click the title to open full screen · click the map for Street View.</p>
-        <div class="elev" data-route="0"></div>
-        <div class="stats">
-          <span class="stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 12l4-4M3 12l4 4M21 12l-4-4M21 12l-4 4"/></svg>{{ '%.1f'|format(c.dist_mi) }} mi · {{ '%.0f'|format(c.dist_km) }} km</span>
-          <span class="stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18l6-8 4 5 3-4 5 7z"/></svg>+{{ '%.0f'|format(c.ascent_m) }} m</span>
-          <span class="stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h12a3 3 0 1 0-3-3M3 14h17a3 3 0 1 1-3 3"/></svg>{{ c.verdict }}</span>
-          {% if c.gravel_pct >= 1 %}<span class="stat">{{ '%.0f'|format(c.gravel_pct) }}% gravel</span>{% endif %}
-          {% if c.unrideable_pct > 0 %}<span class="stat warn">{{ '%.0f'|format(c.unrideable_pct) }}% unrideable</span>{% endif %}
-          {% if c.lane_pct >= 1 %}<span class="stat">{{ '%.0f'|format(c.lane_pct) }}% bike lane</span>{% endif %}
-        </div>
-        <ul>{% for r in c.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
-        <a class="dl" href="{{ url_for('download', name=c.gpx) }}" download="{{ c.dlname }}">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
-          Download GPX</a>
-      </div>
-    {% endif %}
-  {% endfor %}
-
-  {% set alts = cards | selectattr('role', 'ne', 'recommended') | list %}
-  {% if alts %}
-    <div class="section-title" style="margin:2px 0 12px">Other options</div>
-    <div class="optgrid">
-      {% for c in alts %}
-        <div class="card opt" style="margin:0">
-          <h3 class="opt-title" style="font-size:16px" data-route="{{ loop.index }}"
-              role="button" tabindex="0" title="Open this route full screen">
-            <span class="badge alt">Option {{ loop.index }}</span> <span class="opt-name">{{ c.headline }}</span>
-            <span class="expand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></span>
-          </h3>
-          <div class="map sm" data-route="{{ loop.index }}" aria-label="interactive map of an alternative route"></div>
-          <div class="elev" data-route="{{ loop.index }}"></div>
-          <div class="stats">
-            <span class="stat">{{ '%.1f'|format(c.dist_mi) }} mi</span>
-            <span class="stat">+{{ '%.0f'|format(c.ascent_m) }} m</span>
-            <span class="stat">{{ c.shape }}</span>
-            {% if c.unrideable_pct > 0 %}<span class="stat warn">{{ '%.0f'|format(c.unrideable_pct) }}% unrideable</span>{% endif %}
-          </div>
-          <ul>{% for r in c.reasons[:2] %}<li>{{ r }}</li>{% endfor %}</ul>
-          <a class="dl ghost" href="{{ url_for('download', name=c.gpx) }}" download="{{ c.dlname }}">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
-            GPX</a>
+  </div>
+  {% if timeline %}
+    <div class="eyebrow">Wind during your ride</div>
+    <div class="timeline">
+      {% for t in timeline %}
+        <div class="tl" title="{{ '%.0f'|format(t.mph) }} mph from {{ t.from }} at {{ t.time }}">
+          <span class="t">{{ t.time }}</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><g transform="rotate({{ t.deg }} 12 12)"><line x1="12" y1="3" x2="12" y2="16" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M12 21 l-4.5 -6 h9 z" fill="currentColor"/></g></svg>
+          <span class="v">{{ '%.0f'|format(t.mph) }}</span>
+          <span class="d">{{ t.from }}</span>
         </div>
       {% endfor %}
     </div>
   {% endif %}
 
-  <details class="card" style="padding:0">
-    <summary style="padding:16px 20px">
-      <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
-      All {{ ranked|length }} candidates &amp; stats
+  {% if notes %}
+    <details class="more section">
+      <summary>
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        Planner notes <span class="aside">{{ notes|length }}</span>
+      </summary>
+      <div class="inner"><ul class="notes">{% for n in notes %}<li>{{ n }}</li>{% endfor %}</ul></div>
+    </details>
+  {% endif %}
+
+  </div>
+  {% set picks = routes | selectattr('role', 'ne', 'candidate') | list %}
+  {% set others = routes | selectattr('role', 'eq', 'candidate') | list %}
+  <div class="section sec-picks">
+    <div class="eyebrow">Top picks <span class="count">{{ picks|length }}</span></div>
+    <div class="routes carousel">
+      {% for r in picks %}{{ route_card(r) }}{% endfor %}
+    </div>
+  </div>
+  {% if others %}
+    <div class="section">
+      <div class="eyebrow">More candidates <span class="count">{{ others|length }}</span></div>
+      <div class="routes carousel">
+        {% for r in others %}{{ route_card(r) }}{% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  <details class="more">
+    <summary>
+      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+      Compare all {{ routes|length }} routes
     </summary>
-    <div style="padding:0 20px 18px; overflow-x:auto">
-      <table>
+    <div class="inner tablewrap">
+      <table class="cmp">
         <thead><tr>
-          <th>#</th><th>Shape</th><th>Wind</th><th>mi</th><th>km</th><th>Climb</th>
-          <th>Gravel%</th><th>Hwy%</th><th>Path%</th><th>Cross</th><th>Score</th>
+          <th>#</th><th>Route</th><th>{{ unit }}</th><th>Time</th><th>Climb</th><th>Wind</th>
+          <th>{{ 'Unp' if ride_type == 'gravel' else 'Grv' }}%</th><th>Busy%</th><th>Path%</th><th>Score</th>
         </tr></thead>
         <tbody>
-        {% for c in ranked %}
-          <tr>
-            <td>{{ loop.index }}</td><td>{{ c.shape }}</td><td class="muted">{{ c.verdict }}</td>
-            <td>{{ '%.1f'|format(c.dist_mi) }}</td><td>{{ '%.1f'|format(c.dist_km) }}</td>
-            <td>{{ '%.0f'|format(c.ascent_m) }}</td>
-            <td>{{ '%.0f'|format(c.gravel_pct) }}{% if c.unrideable_pct > 0 %} <span style="color:var(--warn)" title="unrideable surface">!{{ '%.0f'|format(c.unrideable_pct) }}</span>{% endif %}</td>
-            <td>{{ '%.0f'|format(c.hwy_pct) }}</td><td>{{ '%.0f'|format(c.path_pct) }}</td>
-            <td>{{ c.cross }}</td><td>{{ '%.2f'|format(c.score) }}</td>
+        {% for r in routes | sort(attribute='rank') %}
+          <tr data-route="{{ r.id }}">
+            <td>{{ r.rank }}</td>
+            <td><span class="dot" style="--c: {{ r.color }}"></span>{{ r.shape }}</td>
+            <td>{{ r.dist_num }}</td><td>{{ r.ride_time or '–' }}</td><td>{{ r.climb }}</td>
+            <td>{{ '%+.2f'|format(r.wind_score) }}</td>
+            <td>{{ '%.0f'|format(r.gravel_pct) }}</td><td>{{ '%.0f'|format(r.hwy_pct) }}</td>
+            <td>{{ '%.0f'|format(r.path_pct) }}</td><td>{{ '%.2f'|format(r.score) }}</td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
-      <div class="muted" style="font-size:12px; margin-top:10px">The cards above are picked from these
-        — re-run with more candidates from the form for a wider search.</div>
     </div>
   </details>
+  </div>
+{% endblock %}
 
-  <div id="route-modal" class="modal" hidden>
-    <div class="modal-backdrop" data-close></div>
-    <div class="modal-box" role="dialog" aria-modal="true" aria-label="Route detail">
-      <div class="modal-head">
-        <strong id="modal-title">Route</strong>
-        <button class="modal-x" data-close type="button" aria-label="Close">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-        </button>
-      </div>
-      <div id="modal-map" class="map"></div>
-      <div class="modal-elev"><div class="elev" id="modal-elev"></div></div>
+{% block stage %}
+  <div class="overlay glass layer-tog">
+    <div class="seg" role="group" aria-label="Routes shown on the map">
+      <label class="seg-opt"><input type="radio" name="layers" value="picks" checked><span>Top picks</span></label>
+      <label class="seg-opt"><input type="radio" name="layers" value="all"><span>All routes</span></label>
+    </div>
+  </div>
+  {% if wind.known %}
+    <div class="overlay glass wind-badge" title="Wind at the start: {{ '%.0f'|format(wind.mph) }} mph from {{ wind.from }}">
+      <svg viewBox="0 0 30 30" aria-hidden="true"><g transform="rotate({{ wind.deg }} 15 15)"><line x1="15" y1="4" x2="15" y2="21" stroke-width="2.6" stroke-linecap="round" style="stroke:var(--brand)"/><path d="M15 27 l-5 -7 h10 z" style="fill:var(--brand)"/></g></svg>
+      <span>{{ '%.0f'|format(wind.mph) }} mph<br><span class="muted" style="font-weight:600">from {{ wind.from }}</span></span>
+    </div>
+  {% endif %}
+  <div class="overlay glass elev-card" id="elev-card">
+    <div class="hd">
+      <span class="dot" id="elev-dot"></span>
+      <span class="name" id="elev-name">Route</span>
+      <span class="meta" id="elev-meta"></span>
+    </div>
+    <div class="elev" id="elev"></div>
+    <div class="legend">
+      <span><i style="background:#16a34a"></i>start / finish</span>
+      <span>› direction of travel</span>
+      <span>click the map for Street View · ↑ ↓ to switch routes</span>
     </div>
   </div>
 
-  {% for c in cards %}
-    <script type="application/json" class="route-data" data-route="{{ loop.index0 }}"
-      data-title="{{ c.headline }}">{{ {'coords': c.coords, 'eles': c.eles} | tojson }}</script>
-  {% endfor %}
-  <script src="{{ url_for('static', filename='vendor/leaflet.js') }}"></script>
-  <script src="{{ url_for('static', filename='map.js') }}"></script>
+  <script type="application/json" id="route-data">{{ {"unit": unit, "routes": map_routes} | tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='map.js', v=asset_v) }}"></script>
 {% endblock %}

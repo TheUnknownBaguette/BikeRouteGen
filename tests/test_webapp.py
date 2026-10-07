@@ -52,6 +52,43 @@ def test_plan_endpoint_renders_results():
         (webapp.planner.plan_routes, render.render_map, render.write_gpx) = orig
 
 
+def test_results_show_every_candidate_and_round_trip_edit():
+    """Every ranked route gets a card + map entry, and 'Edit plan' links back to a
+    form pre-filled with the same inputs."""
+    import json, re
+    orig = (webapp.planner.plan_routes, render.write_gpx)
+    res = _fake_result()
+    extra = engine.Candidate(coords=[(41.50, -87.85), (41.49, -87.85), (41.49, -87.83)],
+                             distance_km=38.0, ascent_m=40.0, paved_frac=1.0,
+                             unpaved_frac=0.0, shape="rectangle")
+    res.ranked.append(extra)
+    webapp.planner.plan_routes = lambda **kw: res
+    render.write_gpx = lambda *a, **k: None
+    try:
+        client = webapp.app.test_client()
+        r = client.post("/plan", data={"location": "Mokena, IL", "distance": "42",
+                                       "unit": "mi", "ride_type": "road", "speed": "18"})
+        html = r.data.decode()
+        assert r.status_code == 200
+        assert html.count('class="rcard') == 3            # 2 options + 1 more candidate
+        assert "More candidates" in html
+        payload = json.loads(re.search(r'id="route-data">(.*?)</script>', html, re.S).group(1))
+        assert payload["unit"] == "mi" and len(payload["routes"]) == 3
+        assert [r["pick"] for r in payload["routes"]] == [True, True, False]
+        edit = re.search(r'href="(/\?edit=1[^"]*)"', html).group(1).replace("&amp;", "&")
+        form = client.get(edit).data.decode()
+        assert 'value="42"' in form and 'value="18"' in form
+    finally:
+        (webapp.planner.plan_routes, render.write_gpx) = orig
+
+
+def test_card_reasons_use_plan_unit():
+    out = webapp._card_reasons(["a different option - a loop, 45.1 km",
+                                "45.1 km, +108 m, ~1:40 at your pace",
+                                "17% path (connectors)"], "mi")
+    assert out == ["a different option - a loop, 28.0 mi", "17% path (connectors)"]
+
+
 def test_index_and_about_render():
     client = webapp.app.test_client()
     assert client.get("/").status_code == 200

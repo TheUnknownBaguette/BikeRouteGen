@@ -1,14 +1,61 @@
-// Disable the submit button and show a "working" hint while a plan runs.
-// Kept in a static file (not inline) so the page can use a strict
-// Content-Security-Policy with script-src 'self' (no 'unsafe-inline').
+// Plan-form behaviour. Kept in a static file (not inline) so the page can use a
+// strict Content-Security-Policy with script-src 'self' (no 'unsafe-inline').
+
+// While a plan runs: disable the button and show a progress overlay on the map
+// that walks through what the planner is doing.
 (function () {
   var form = document.getElementById('planform');
   if (!form) return;
+  var STEPS = ['Checking the wind forecast…', 'Sketching loops around your start…',
+               'Routing candidates on real roads…', 'Reading surfaces & traffic…',
+               'Scoring each route on the wind you’ll meet…', 'Picking the best options…'];
   form.addEventListener('submit', function () {
     var go = document.getElementById('go');
-    var working = document.getElementById('working');
-    if (go) { go.disabled = true; go.textContent = 'Planning…'; }
-    if (working) { working.style.display = 'inline'; }
+    var overlay = document.getElementById('loading');
+    var step = document.getElementById('loading-step');
+    if (go) { go.disabled = true; go.lastChild.textContent = ' Planning…'; }
+    if (overlay) overlay.hidden = false;
+    var i = 0;
+    if (step) setInterval(function () { i = Math.min(i + 1, STEPS.length - 1); step.textContent = STEPS[i]; }, 5500);
+  });
+  // coming back via the browser's back button: un-stick the busy state
+  window.addEventListener('pageshow', function (e) {
+    if (!e.persisted) return;
+    var go = document.getElementById('go');
+    var overlay = document.getElementById('loading');
+    if (go) { go.disabled = false; go.lastChild.textContent = ' Plan my rides'; }
+    if (overlay) overlay.hidden = true;
+  });
+})();
+
+// Tell the map a start point was chosen in the panel (suggestion / my location).
+function wrPicked(lat, lng, label) {
+  var f = function (id, v) { var el = document.getElementById(id); if (el) el.value = v; };
+  f('picked_lat', lat); f('picked_lng', lng); f('picked_label', label); f('location', label);
+  try { window.dispatchEvent(new CustomEvent('wr:picked', { detail: { lat: +lat, lng: +lng } })); } catch (e) {}
+}
+
+// "Use my location" button.
+(function () {
+  var btn = document.getElementById('locate');
+  if (!btn) return;
+  if (!('geolocation' in navigator)) { btn.hidden = true; return; }
+  btn.addEventListener('click', function () {
+    btn.disabled = true;
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      btn.disabled = false;
+      var lat = pos.coords.latitude.toFixed(5), lng = pos.coords.longitude.toFixed(5);
+      wrPicked(lat, lng, lat + ', ' + lng);
+    }, function () { btn.disabled = false; }, { enableHighAccuracy: true, timeout: 10000 });
+  });
+})();
+
+// Pace unit follows the distance unit (mph / km/h).
+(function () {
+  var lbl = document.getElementById('speed-unit');
+  if (!lbl) return;
+  document.querySelectorAll('input[name="unit"]').forEach(function (r) {
+    r.addEventListener('change', function () { if (r.checked) lbl.textContent = r.value === 'km' ? 'km/h' : 'mph'; });
   });
 })();
 
@@ -66,8 +113,7 @@
 
   function choose(i) {
     if (i < 0 || i >= items.length) return;
-    input.value = items[i].label;
-    setPicked(items[i]);
+    wrPicked(items[i].lat, items[i].lng, items[i].label);
     close();
   }
 
