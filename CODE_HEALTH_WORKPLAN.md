@@ -10,6 +10,13 @@ If `ROUTE_ALGO_WORKPLAN.md` and this file ever conflict on a shared file, the al
 plan wins on scoring/generation behavior; this plan wins on structure/infra. Neither
 may regress the home-region golden route (see Regression gate).
 
+> **Status (Oct 2026):** every task below is done. Later front-end work (the map-first
+> web UI, share links, wind arrows, address search) followed the same rules — the web app
+> is still a thin layer over `planner.plan_routes`, and `pytest` covers it offline
+> (`tests/test_webapp.py`, `tests/test_suggest.py`). See `PROJECT_CONTEXT.md` for those
+> features. Note for anyone reviewing the web code: some ride/wind math is intentionally
+> duplicated in `static/wind.js` so the map matches the scorer.
+
 ---
 
 ## 0. Read this before touching code

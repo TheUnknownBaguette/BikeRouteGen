@@ -7,6 +7,13 @@ exists; this file is the source of truth for what to change and in what order.
 
 This supersedes any earlier free-form "improvement notes." If both are present, follow this one.
 
+> **Status (Oct 2026):** every task below is done. Work since then was driven directly
+> by the owner, not by this plan — notably **changing-wind scoring** (routes scored on the
+> wind met along the way at the rider's pace, with a headwind-slows-you model and
+> forecast-aware aiming). It deliberately reduces to the classic `wind_score` in a steady
+> wind, so the regression gate below still holds. Details: `PROJECT_CONTEXT.md`
+> "Changing-wind scoring". The two "Captured ideas" are still open.
+
 ---
 
 ## 0. Read this before touching code

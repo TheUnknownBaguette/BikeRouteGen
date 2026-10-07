@@ -1,29 +1,36 @@
 # windroute
 
 Generate **wind-smart cycling routes** from a few inputs — start point, distance,
-ride time, ride type — and get back a **recommended route plus two alternatives**
-(labelled map images + GPX files) you import into Ride with GPS.
+ride time, ride type, your pace — and get back a **recommended route plus two
+alternatives** (GPX files you import into Ride with GPS), shown on an interactive
+map in the web app or as labelled map images from the command line.
 
-The point of the *start time* input: it pulls the wind forecast for the actual
-hour you'll be riding, then ranks candidate routes so you head **out into the
-wind while fresh and get the tailwind home**.
+The point of the *start time* and *pace* inputs: it pulls the hourly wind forecast
+for the hours you'll actually be riding, then ranks candidate routes so you head
+**out into the wind while fresh and get the tailwind home** — and if the forecast
+says the wind will die or swing round mid-ride, it plans for the wind you'll
+*meet*, not just the wind when you leave.
 
 ## What it does
 
 1. Geocodes your start (a town, a full street address, or exact `lat,lng` — even
    Google-Maps degrees-minutes-seconds like `41°31'36.3"N 87°52'18.0"W`).
-2. Pulls hourly wind for your start time (Open-Meteo, free, no key).
+2. Pulls the hourly wind forecast for the ride window at your start **and a ring of
+   points around it** (Open-Meteo, free, no key; US National Weather Service as a
+   fallback), so it knows how the wind changes over time and across the area.
 3. Generates candidate routes of your target distance (OpenRouteService) in
    several shapes — loop, lollipop, wind-aligned rectangle, optional out-and-back.
    Loops are built as clean geometric polygons through the road grid (no tangled,
-   spurry routing).
-4. Scores each on wind (into-wind first half, tailwind home), surface (avoid
-   gravel on road rides, seek it on gravel rides), busy-highway avoidance,
-   bike-lane bonus / multiuse-path penalty, tidiness, and distance, then writes a
+   spurry routing). They're aimed at the heading the forecast favors, which is
+   usually — but not always — straight into the wind.
+4. Rides each candidate at your pace (a little slower into headwinds, faster with
+   tailwinds) and scores it on the wind it meets along the way, plus surface (avoid
+   gravel on road rides, seek it on gravel rides), busy-highway avoidance, bike-lane
+   bonus / multiuse-path penalty, tidiness, and distance. It returns a
    **recommendation plus two alternatives** — each leading on a different benefit
    (stronger wind line, quieter roads, more bike lane, or a closer distance) and a
-   genuinely different ride. Files: `route.png/.gpx` (pick), `route-alt1.*`,
-   `route-alt2.*`.
+   genuinely different ride. The CLI writes `route.png/.gpx` (pick), `route-alt1.*`,
+   `route-alt2.*`; the web app shows every candidate on a map.
 5. Optionally **stages** the ride to quieter country (`--ride-area`): transit to
    the nearest good quiet riding zone — or one in a compass direction you choose
    (e.g. `south`) — loop on the wind there, and ride home.
@@ -78,11 +85,38 @@ After the one-time setup above, you can skip PowerShell entirely:
 
 **Double-click `run.bat`.** On first run (or on a new machine) it builds the local
 Python environment for you, then starts a local server and opens your browser to
-`http://127.0.0.1:5000`. Fill in the form — the **start point** autocompletes
-addresses and towns as you type, **start time** is a calendar/clock picker, and an
-*advanced* block adds shapes, surface source, and ride-area staging — then hit **Plan
-my routes** to get the recommendation plus two alternatives, each with its map inline
-and a GPX download. A plan takes ~20–40 s (same routing + wind services as the CLI).
+`http://127.0.0.1:5000`. The app is a full-screen map with a side panel (a bottom
+sheet on phones). A plan takes ~20–40 s (same routing + wind services as the CLI).
+
+**Planning a ride**
+
+- **Start point** — type a town or an exact street address, click the map to drop a
+  pin exactly where you'll roll out, or use the "my location" button. Suggestions
+  favor places near the area on the map, narrow instantly as you type, and clicking
+  into the box offers your recent starts. If OpenStreetMap doesn't know your house
+  number, the list says so (pick the street or drop a pin), and a plan that could only
+  find the street shows an "approximate start" warning.
+- **Distance**, **your pace** (your usual speed in still air — default 17 mph), **ride
+  type**, and **when** you're riding. An *advanced* block adds shapes, surface source,
+  ride-area staging, tolerance, candidate count, and terrain tuning.
+
+**Reading the results**
+
+- Every candidate is drawn on one map; the three **top picks** are in distinct colors
+  and the rest show with **All routes**. Click a card, click a route on the map, use
+  ↑/↓, or (on a phone) swipe the cards to select one: the map zooms to it, small
+  chevrons show the direction of travel, and its **elevation profile** appears below.
+- **Wind along your route** — the selected route gets an arrow about every 2 miles
+  showing where the wind will be blowing *when you get there*, colored by how it hits
+  you: red headwind, amber crosswind, green tailwind. Hover one for the mile, time, and
+  speed. The same colors run as a strip under the elevation profile. Turn them off with
+  the **Wind** button.
+- **Map styles** — *Map* (clean, with a dark version in dark mode), *Cycling*
+  ([CyclOSM](https://www.cyclosm.org): bike lanes, trails and surfaces drawn on the
+  map), and *Topo* (OpenTopoMap). Click anywhere for a Street View link.
+- **Download GPX** on any card, **Edit plan** to go back to the form with your inputs
+  still filled in, and **Share** to copy a link to the routes (see below).
+
 A footer **About** link covers privacy and the ride-safety disclaimer.
 
 It runs only on your own machine (`127.0.0.1`, not exposed to your network) and reads
@@ -94,6 +128,15 @@ It runs only on your own machine (`127.0.0.1`, not exposed to your network) and 
 
 > Same engine underneath — the web app and the CLI both call `windroute.planner`, so
 > they always agree.
+
+### Share links
+
+**Share** on a results page copies a link (on a phone it opens the share sheet). The
+routes travel *inside the link itself* — simplified to within a few metres, compressed,
+and stored after the `#` — so nothing is saved on the server, the link never expires,
+and the server never even sees the route. Anyone who opens it gets the same map, cards,
+wind arrows, and GPX downloads (built in their browser). Links run ~5,000 characters for
+three routes, which messaging apps handle fine but SMS may not.
 
 ## Share it with friends (free hosting)
 
@@ -186,7 +229,8 @@ python -m windroute.cli plan -l "Asheville, NC" -d 30 --classify
 | `-d, --distance` | Target ride distance (total, including any transit). |
 | `--unit` | `mi` (default) or `km`. |
 | `-t, --tolerance` | Free +/- distance buffer; only distance beyond it is penalized (default 3). |
-| `-s, --start` | `"YYYY-MM-DD HH:MM"` or `now`. Sets the wind forecast hour. |
+| `-s, --start` | `"YYYY-MM-DD HH:MM"` or `now`. Sets when the ride starts, so it scores the forecast for the hours you'll be out. |
+| `--speed` | Your usual pace in still air, in mph (or km/h with `--unit km`); default 17. You're modeled a little slower into headwinds and faster with tailwinds, which decides what wind each part of the route meets. |
 | `-r, --ride-type` | `road` (avoid gravel) or `gravel` (seek it). |
 | `--shapes` | Comma list: `loop,lollipop,rectangle,out-and-back` (default `loop,lollipop,rectangle`). `loop` is a clean polygon (different roads out and back); `lollipop` rides a stem out, loops the far end, stems back; `rectangle` is a long leg into the wind, a short crosswind jog, and a long parallel leg home (great in grid country); `out-and-back` retraces the same roads (opt-in). |
 | `--surface-source` | `ors` (default), `osm` (finer OSM tags + bike lanes), or `both` (cross-check). |
@@ -270,6 +314,14 @@ old entries.
   than a confidently-wrong gravel figure.
 - **Wind optimization** ranks a handful of generated routes rather than searching
   exhaustively. More `--candidates` improves the odds at the cost of speed/API calls.
+- **The wind is a forecast, and your pace is a model.** Timing assumes your still-air
+  pace minus a quarter of the headwind (plus a quarter of any tailwind); real days vary.
+  The wind is interpolated between hourly forecasts at the start and six points around
+  it, so very local effects (a lakefront breeze, a tree-lined road) aren't captured.
+- **House numbers** come from OpenStreetMap, which is often missing them in suburbs.
+  When it is, you'll be told the start is approximate — drop a pin for an exact start.
+  The address search uses the free public Photon server, so a brand-new search can take
+  a second or two (repeats are instant).
 - **Ride-area staging** uses open farmland as its "quiet country" proxy, so it
   shines in grid/cornfield regions and is weaker where good riding isn't farmland.
 - **Terrain adaptation** (`--classify`) is calibrated against real rides only for flat
@@ -282,10 +334,10 @@ old entries.
 windroute/
   engine.py       compatibility facade re-exporting the core modules below as one flat
                   `engine.*` namespace (call sites import from here)
-  models.py       data containers (Wind, Candidate, RouteOption)
+  models.py       data containers (Wind, WindField, Candidate, RouteOption)
   geometry.py     pure geometry + compass helpers
-  geocode.py      geocoding + type-ahead autocomplete
-  wind.py         wind forecast + historical wind
+  geocode.py      geocoding (towns, addresses, coords) + type-ahead autocomplete
+  wind.py         wind forecast (hourly field over the ride area) + historical wind
   routing.py      route generation + shapes (OpenRouteService), refinement
   scoring.py      weights, scoring, route-option selection
   planner.py      the shared planning pipeline every front-end calls (plan_routes)
@@ -299,8 +351,11 @@ windroute/
   cli.py          the CLI wrapper (typer + rich)
 webapp.py         the local/hosted web front-end (Flask)
 discord_bot.py    optional Discord front-end (thin over planner; not wired in)
-templates/        web app HTML (base, index, results, about)
-static/           web app JS (app.js) + generated maps/GPX (out/, swept hourly)
+templates/        web app HTML: app shell (app, _stage, _macros), plan form (index),
+                  results, shared links (share), about
+static/           web app assets: style.css, app.js (form + address search), map.js
+                  (map, routes, elevation), wind.js (wind along a route), share.js
+                  (share links), vendor/ (Leaflet), out/ (generated GPX, swept hourly)
 tests/            offline unit tests — run with `pytest` from the project root
 run.bat           double-click launcher for the web app (self-builds the venv)
 Procfile          production start command for a host (waitress-serve webapp:app)
@@ -339,13 +394,18 @@ keep these attributions** — a couple are required by license:
   [Overpass API](https://overpass-api.de/) (surface / bike-lane / farmland tags), and
   [Photon](https://photon.komoot.io/) by [komoot](https://www.komoot.com/) (the
   type-ahead location autocomplete in the web form).
-- **Basemap tiles** in the route images — © OpenStreetMap contributors, served from the
-  OpenStreetMap [tile servers](https://operations.osmfoundation.org/policies/tiles/)
-  (light personal use only; don't point a busy public deployment at them).
+- **Basemap tiles** — © OpenStreetMap contributors. The CLI's route images and the web
+  app's *Map* style use the OpenStreetMap
+  [tile servers](https://operations.osmfoundation.org/policies/tiles/); the *Cycling*
+  style is [CyclOSM](https://www.cyclosm.org), hosted by
+  [OpenStreetMap France](https://openstreetmap.fr); the *Topo* style is
+  [OpenTopoMap](https://opentopomap.org) (CC-BY-SA). All are free community services
+  for light use — don't point a busy public deployment at them.
 - **Trip history** — the [Ride with GPS](https://ridewithgps.com/) API, used by the
   `learn` command on your own recorded rides.
 
 Built with Python and [Flask](https://flask.palletsprojects.com/),
+[Leaflet](https://leafletjs.com/) (the web map),
 [staticmap](https://github.com/komoot/staticmap), [Pillow](https://python-pillow.org/),
 [requests](https://requests.readthedocs.io/), [Typer](https://typer.tiangolo.com/),
 [Rich](https://github.com/Textualize/rich), [python-dateutil](https://github.com/dateutil/dateutil),
@@ -353,5 +413,6 @@ and [waitress](https://github.com/Pylons/waitress).
 
 > **Note:** OpenStreetMap and CC BY 4.0 both expect the attribution to be *visible to
 > people viewing the maps*, not only in this README. The web app already does this —
-> every page footer shows "© OpenStreetMap contributors · Weather by Open-Meteo.com"
-> with links. Keep that footer (and the `/about` page) if you fork or host it.
+> the map's corner credits the tile source in use, and the side panel's footer (or the
+> page footer on `/about`) shows the routing, map, and weather credits with links. Keep
+> those (and the `/about` page) if you fork or host it.

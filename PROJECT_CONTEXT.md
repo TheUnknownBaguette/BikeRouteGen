@@ -11,10 +11,11 @@ the non-obvious decisions behind it. Keep it updated when you finish a feature.
 `BikeRouteGen` is a **wind-smart cycling route generator** (Python package
 `windroute/`). Give it a start point, distance, ride time, and ride type; it pulls
 the wind forecast for that hour, generates candidate routes, scores them so you
-ride **into the wind while fresh and get the tailwind home**, and writes a
-**recommended route plus two alternatives** (each leading on a different benefit) as
-labelled maps + GPX files (`route.png/.gpx`, `route-alt1.*`, `route-alt2.*`) you
-import into Ride with GPS.
+ride **into the wind while fresh and get the tailwind home** — using the wind you'll
+*meet* as the forecast changes through the ride, at your pace — and returns a
+**recommended route plus two alternatives** (each leading on a different benefit): as
+labelled maps + GPX files from the CLI (`route.png/.gpx`, `route-alt1.*`, `route-alt2.*`)
+or on an interactive map in the web app, for import into Ride with GPS.
 
 - **Location:** the project folder (`path\to\BikeRouteGen`)
 - **APIs:** OpenRouteService (routing, needs free key), Open-Meteo (geocode + wind
@@ -46,6 +47,7 @@ import into Ride with GPS.
 cd path\to\BikeRouteGen
 .\.venv\Scripts\Activate.ps1
 python -m windroute.cli plan -l "Chicago, IL" -d 30 -s "2026-06-14 08:00" -r road
+python -m windroute.cli plan -l "Mokena, IL" -d 30 --speed 18   # still-air pace (default 17)
 python -m windroute.cli plan -l "Aspen, CO" -d 25 --classify   # adapt tuning to terrain
 python -m windroute.cli classify -l "Aspen, CO"                # terrain archetype only (no ORS key)
 ```
@@ -71,20 +73,28 @@ python -m windroute.cli learn --no-surface      # fast: geometry/distance/direct
 Full setup + every option is in `README.md`.
 
 **Local web app (no terminal):** `python webapp.py` (or double-click `run.bat`) starts
-a Flask server on `127.0.0.1:5000` and opens a browser; a form runs `plan_routes` and
-shows the recommendation + 2 alternatives with inline maps + GPX downloads. Maps/GPX
-are written to `static/out/` (gitignored, swept after 1 h). `webapp.py` reads `HOST`/
-`PORT` from the env (default local), so the same file serves locally and on a server.
-Form niceties: the **start point autocompletes** addresses + towns as you type
-(`/suggest` → `engine.suggest_places`, Photon), **start time** is a `datetime-local`
-picker (prefilled client-side to the local hour; empty → "now"), each advanced option has
-an **ⓘ hover tooltip**, and the prefilled location is **Chicago, IL** (not the owner's
-town). `run.bat` is **self-healing**: it builds the venv on first run and rebuilds it if
-one was synced from another machine (a venv isn't relocatable — see gotchas).
+a Flask server on `127.0.0.1:5000` and opens a browser. It's a map-first app: a side
+panel (phone: bottom sheet) next to a full-height Leaflet map. The form runs
+`plan_routes`; the results put **every ranked candidate** on the map with a card + GPX
+download, the selected route with direction chevrons, wind arrows per section and an
+elevation profile, plus Share / Edit plan. GPX files are written to `static/out/`
+(gitignored, swept after 1 h). `webapp.py` reads `HOST`/`PORT` from the env (default
+local), so the same file serves locally and on a server. Form: start point by address
+search (`/suggest` → `engine.suggest_places`, Photon, biased to the map area), map click,
+or "my location"; pace (default 17); **start time** is a `datetime-local` picker
+(prefilled client-side to the local hour; empty → "now"); each advanced option has an
+**ⓘ hover tooltip**; the prefilled location is **Chicago, IL** (not the owner's town).
+Routes: `/` form, `/plan`, `/share` (shared-link page), `/suggest`, `/about`,
+`/download/<file>`. `run.bat` is **self-healing**: it builds the venv on first run and
+rebuilds it if one was synced from another machine (a venv isn't relocatable — see gotchas).
+
+**Previewing locally from Claude Code:** the `webapp-c` entry in the parent folder's
+`.claude/launch.json` serves the app with waitress on port 5057 (no browser pop-up). The
+older `webapp` entry there points at a `D:/OneDrive/...` path from the owner's other PC.
 
 **Hosting / future self-host (so friends need no key):** `Procfile` runs `waitress`
 (cross-platform prod server, in requirements) via `waitress-serve --listen=*:$PORT
-webapp:app`. CURRENT: hosted on a free service (e.g. Render) — connect the repo, that
+webapp:app`. CURRENT: hosted on Render (free tier), deployed from `main` — the owner verifies UI fixes there. To set up: connect the repo, that
 start command, and set `ORS_API_KEY` as a server SECRET (never in the public repo).
 FUTURE self-host (owner wants their own mini server eventually, doesn't have one yet,
 2026-06): the SAME `waitress-serve` command runs on any box (Windows/Linux/Pi) — set
@@ -107,15 +117,21 @@ windroute/
   engine.py       COMPATIBILITY FACADE: re-exports the modules below as the historical flat
                   `engine.NAME` namespace (call sites unchanged). To MONKEYPATCH an internal,
                   patch its HOME module, not engine (CODE_HEALTH Task C1).
-  models.py       data containers: Wind / Candidate / RouteOption (no logic)
+  models.py       data containers: Wind / WindField (hourly wind over the ride area, IDW +
+                  linear-time lookup) / Candidate / RouteOption
   geometry.py     pure primitives: _bearing/_haversine_km/_destination/_polyline_km/
                   _self_intersections/_thin + compass_label/parse_compass/COMPASS_16
-  geocode.py      geocode + suggest_places (Photon autocomplete) + DMS/coords parsing
-  wind.py         get_wind (+ get_wind_historical): Open-Meteo primary, US NWS fallback,
-                  calm Wind(known=False) on dual failure (Task B1)
+  geocode.py      geocode (coords / addresses via biased Photon->Nominatim / towns) +
+                  suggest_places (Photon autocomplete, map-area bias, 15-min cache) +
+                  house_number/missing_house_number + DMS/coords parsing
+  wind.py         get_wind (+ get_wind_historical): Open-Meteo primary (one multi-location
+                  request -> WindField), US NWS fallback (start-point field), calm
+                  Wind(known=False) on dual failure (Task B1)
   routing.py      ORS directions, geometric shapes, generate_candidates (CONCURRENT, Task A2),
                   refine_candidate, surface/waytype fractions, _smoothed_ascent
-  scoring.py      RouteWeights + archetype tables, wind_score, evaluate, select_route_options, explain
+  scoring.py      RouteWeights + archetype tables, wind_score (classic) + timed_wind_score /
+                  ground_speed_mph / best_aim_bearing (changing wind), evaluate,
+                  select_route_options, explain / wind_summary / wind_verdict
   planner.py      SHARED pipeline: plan_routes() -> PlanResult (geocode->wind->staging->generate->surface->corrections->evaluate->options); optional location_label override. No printing/files. CLI + web both call it.
   zones.py        find_ride_zone: best quiet riding zone, nearest OR a forced compass direction (prefer_bearing) — for --ride-area staging
   regions.py      classify_region -> RegionProfile (terrain archetype): one Overpass read (roads + land-use) + Open-Meteo elevation (relief), cached per ~0.1° cell. classify_archetype() is pure. Diagnostic only so far (work-plan Task 1) — does NOT yet drive weights
@@ -125,10 +141,16 @@ windroute/
   learn.py        analyse imported trips -> rider profile + suggested weight changes (pure); geographic clustering + region_mismatch_note + save/load training-region archetype (Task 8)
   render.py       map image + GPX output
   cli.py          CLI front-end: plan / classify / mark / roads-import / corrections / forget / rwgps-login / import / learn
-webapp.py         local/hosted web front-end (Flask): routes / /plan /suggest /about; headers + rate limit
+webapp.py         local/hosted web front-end (Flask): / /plan /share /suggest /about /download;
+                  builds the results page payload (#route-data JSON); headers + rate limit
 discord_bot.py    optional Discord front-end (thin over planner.plan_routes; needs discord.py; not wired in)
-templates/        web HTML: base / index (form) / results / about (privacy + disclaimer)
-static/           app.js (datetime + autocomplete JS); out/ generated maps+GPX (gitignored, swept hourly)
+templates/        base (head + reading layout for about) / _macros (brand, credits) / app (map
+                  shell) / _stage (map overlays) / index (form) / results / share / about
+static/           style.css (all styles, light + dark) / app.js (form, address search,
+                  recent starts) / map.js (basemaps, routes, selection, elevation, wind arrows)
+                  / wind.js (wind field + ride model ported from Python) / share.js (share-link
+                  encode/decode + shared page) / vendor/ (Leaflet 1.9.4) / out/ (generated
+                  GPX, gitignored, swept hourly)
 run.bat           double-click launcher; self-builds/repairs the venv (see gotchas)
 Procfile          prod start command for a host (waitress-serve webapp:app)
 README.md         user-facing setup + usage
@@ -374,6 +396,23 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   shows the address as the label via `plan_routes(location_label=…)`), a **datetime-local**
   start-time picker, and an **ⓘ tooltip** on each advanced option (ride type / surface /
   ride-area / tolerance / candidates). Default location Chicago (privacy).
+- **Responsive address search + safe typed addresses (Oct 2026):** the public Photon server
+  takes ~1.5-3.5 s per query, so the field is built to feel instant anyway:
+  - `/suggest?q=&lat=&lng=` biases Photon to the form map's center ("Mok" -> Mokena, not
+    Mokpo); `suggest_places` caches results 15 min per (query, ~10 km cell) and the response
+    is browser-cacheable 10 min.
+  - `app.js` keeps a per-page cache and **narrows the closest earlier result list on every
+    keystroke** (word-start matching, matched words bold) while the fresh lookup runs; stale
+    lookups are aborted; spinner; 120 ms debounce. Focus selects the old text and shows up to
+    5 **recent starts** (localStorage). A hint row appears when no suggestion has the typed
+    house number.
+  - **Submit path:** the form sends the map center (`near_lat/near_lng`) and
+    `geocode(place, near=)` tries biased Photon then Nominatim for address-like input. An
+    input that **starts with a house number never falls back to a town-name match** (that bug
+    turned "233 S Wacker" into the town of Wacker, IL, ~150 km away). If only the street is
+    found, the plan runs from it and the planner adds a `start:` note that the results page
+    shows as a visible warning (not in the collapsed notes); if nothing is found, the error
+    tells the rider to pick a suggestion or drop a pin. Tests: `tests/test_suggest.py`.
 - **Descriptive output names:** files auto-name from the ride —
   `render.route_basename(when, dist_km, unit, shape, wind_from_deg)` →
   `jun14-30mi-loop-Swind`, deduped via `render.dedupe_names`. CLI uses them when `-o` is
@@ -546,6 +585,20 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   Overpass reads now go through `surface.overpass_json`, which falls back across `OVERPASS_MIRRORS`
   (overpass-api.de -> maps.mail.ru -> kumi.systems), so a 504 on the primary no longer kills a read.
 
+- **OSM tiles need a `Referer`:** the web app once sent `Referrer-Policy: no-referrer`, and
+  tile.openstreetmap.org answered every tile with a redirect to its "Blocked tiles" page.
+  Keep `strict-origin-when-cross-origin` (sends only the origin, never route params) and use
+  `tile.openstreetmap.org` (the `{s}.` a/b/c subdomains are deprecated). The CSP `img-src`
+  must list every tile host (OSM, `*.tile-cyclosm.openstreetmap.fr`, `*.tile.opentopomap.org`).
+- **CARTO basemaps now need an API key** — their keyless tiles come back stamped
+  "API KEY REQUIRED" with HTTP 200, so tile-error fallbacks never fire. Don't reintroduce.
+- **The ride/wind model exists twice:** `wind.js` ports `WindField` lookup and
+  `ground_speed_mph` (`WIND_SPEED_EFFECT` 0.25, clamps 0.5-1.6x) from Python so the map's
+  per-section wind arrows match what the scorer assumed. Change one, change both.
+- **`from windroute import geocode` is the function, not the module** (the package
+  re-exports `geocode()`); tests that monkeypatch the module use
+  `sys.modules["windroute.geocode"]`.
+
 ## What the trip history revealed (Jun 2026, newest 200 trips → 108 outdoor rides)
 
 The owner's *better-era* rides (he asked for the newest 200, not all 604 — older ones predate
@@ -581,6 +634,11 @@ his improved route-making). Every tuning decision below is backed by this:
   particular local trail/road out regardless); (b) a "best-day finder" scanning the 7-day
   forecast for the day that best rewards a chosen-direction ride. The `learn` direction
   histogram could seed a default bias.
+- **Default the start box to the most recent start** instead of "Chicago, IL" (recent starts
+  are already in localStorage) — offered Oct 2026, not yet asked for.
+- **Tune `WIND_SPEED_EFFECT` from ride history:** RWGPS trips have per-ride speed and `learn`
+  already backfills historical wind, so the headwind slowdown (hand-set to 0.25 from one
+  anecdote) could be fitted to real rides.
 - **Auto-tune weights from `learn`:** the analysis already emits suggested weight changes;
   a future pass could fit the weights to the trip history instead of hand-tuning. (Deliberately
   deferred — owner chose "analysis + review" over auto-retune.)
