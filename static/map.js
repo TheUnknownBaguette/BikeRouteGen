@@ -17,7 +17,7 @@
     } catch (e) { /* skip malformed */ }
   });
 
-  var TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+  var TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
   var ATTRIB = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
   function streetViewUrl(lat, lng) {

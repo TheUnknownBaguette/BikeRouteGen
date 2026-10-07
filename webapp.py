@@ -90,10 +90,12 @@ def _clamp(value, lo: float, hi: float, default: float) -> float:
 def _security_headers(resp):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
-    resp.headers["Referrer-Policy"] = "no-referrer"
+    # OSM tile policy requires a Referer on browser tile requests; send only the
+    # origin cross-site (no path/query, so route params never leak).
+    resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     resp.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "img-src 'self' data: https://*.tile.openstreetmap.org; "
+        "img-src 'self' data: https://tile.openstreetmap.org; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
