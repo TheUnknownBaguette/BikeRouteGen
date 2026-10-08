@@ -887,7 +887,7 @@ def _candidates_table(ranked, ride_type, compare=False, show_lane=False):
             if c.unrideable_frac:
                 cell += f" [red]!{c.unrideable_frac * 100:.0f}[/]"
             row.append(cell)
-        busy = c.busy_frac + c.poor_road_frac           # highways + poor-for-bike arterials
+        busy = c.busy_frac + c.poor_road_frac + c.fast_road_frac   # all "busy road"
         hwy_pct = busy * 100
         hwy_cell = (f"{hwy_pct:.0f}" if busy <= engine.BUSY_FREE_FRAC
                     else f"[yellow]{hwy_pct:.0f}[/]" if busy < 0.20

@@ -182,6 +182,10 @@ areas. Keep the bonus modest and the penalty (if any) local.
 
 ## 4. Real traffic counts (AADT)
 
+> **Reworked 2026-10-08 (owner: must work anywhere):** built from OSM `maxspeed` / `lanes`
+> instead of Illinois/Indiana traffic counts. The AADT notes below are kept as an optional
+> future add-on.
+
 **Goal:** replace "busy = road class" with actual cars per day, e.g. avoid roads over
 ~5,000 vehicles/day. This was "Task 4b" in the old route-algo plan.
 
@@ -262,5 +266,6 @@ database), and handling token refresh. Revisit when there's demand.
 | 2026-10-08 | 2 | Cue sheet confirmed on the hosted site. **Item 2 done.** |
 | 2026-10-08 | 1 | **Built.** `suitability` extra on every ORS call; `Candidate.poor_road_frac` = share rated <=5 that isn't a State Road (calibration: arterials are 5, streets 8, paths 9, rural county roads 7 = fine); `W_POOR=1.0` beyond a 2% free band; cards/table "busy road" % = busy + poor. Before/after: top picks unchanged in Mokena/Oak Park/Naperville, one arterial-heavy route dropped 2 places. Also: a dropped ORS connection no longer kills the plan, and a 429 now says "wait a minute" |
 | 2026-10-08 | 5 | **Built** (no owner example needed: measured real plans instead). Found 1-3 spurs per lollipop and some loops/rectangles: in-and-back pokes at the stem/candy join, dead ends with turning circles, U-turns on divided roads (Roosevelt, Mannheim, Pershing), up to ~1.3 km each route. `routing._trim_spurs` (distance-paired, 50 m sides, >= 60 m long) cuts them on every shape but out-and-back. ORS now avoids ferries/steps/fords. ORS doesn't return access restrictions for bikes, but its bike profiles already skip private/no-access roads. Cue fixes: hairpins onto another road are "sharp left/right", not "turn around"; no cues in the first/last 30 m |
+| 2026-10-08 | 4 | **Built (OSM version).** `surface.FastRoads`: one Overpass read per plan (12 s query, 30 s cap across mirrors; on failure the plan carries on with a note). A stretch counts when the route is ON a road with maxspeed >= 45 mph or 4+ lanes (route road name must match the OSM name/ref, so side paths don't count). `Candidate.fast_road_frac` keeps only the share beyond busy + poor; `W_FAST=1.0` beyond 2%. Calibration: Gougar Rd (55 mph, ORS suitability 7) was the main gap near Mokena. Before/after: Mokena's #2 (6% fast) fell to #4; Naperville's #1 (10% fast) fell to #2. Lookup took ~3 s |
 | 2026-10-08 | 5 | Owner's bad/good GPX pair (Urbana, north of the Boneyard): the bad route takes unnamed `highway=service` ways off N Fourth St north of Bradley (OSM #1317157631-34, #1346949062), then N Oak St north of W Anthony Dr (#5338926) and Somer Dr (#5330479, #882135052, #882135051) to Lincoln Ave. OSM tags them as ordinary roads (TIGER import, `tiger:reviewed=no`), ORS suitability rates N Oak 8/10, and `cycling-regular` (our road profile) picks this exact line (`cycling-road` doesn't). No general tag separates them from good unreviewed rural roads, so the fix chosen is **owner edits OSM**. Not built: an avoid-list via ORS `avoid_polygons`, or a penalty on long unnamed service-road runs |
 | 2026-10-08 | 3 | **Shelved** by owner: wants the planner to work in as many places as possible, not tuned to their own riding |

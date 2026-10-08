@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import math
 
+import time
+
 import requests
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
@@ -30,22 +32,29 @@ OVERPASS_MIRRORS = (
 )
 
 
-def overpass_json(query, timeout=90, url=None):
+def overpass_json(query, timeout=90, url=None, deadline_s=None):
     """POST an Overpass query, trying mirrors in order until one answers.
 
     Returns the parsed ``elements`` list. If `url` is given it's tried first (then
     the other mirrors as fallback); otherwise all mirrors are tried in order.
     Raises the last error only if EVERY endpoint fails, so a single 504 / timeout
-    no longer kills a read.
+    no longer kills a read. `deadline_s` caps the total time across mirrors (for
+    optional reads that must not hold up a plan).
     """
     if url:
         urls = [url] + [m for m in OVERPASS_MIRRORS if m != url]
     else:
         urls = list(OVERPASS_MIRRORS)
     last_exc = None
+    start = time.monotonic()
     for u in urls:
+        wait = timeout + 15
+        if deadline_s is not None:
+            wait = min(wait, deadline_s - (time.monotonic() - start))
+            if wait <= 1:
+                break
         try:
-            resp = requests.post(u, data={"data": query}, timeout=timeout + 15,
+            resp = requests.post(u, data={"data": query}, timeout=wait,
                                  headers={"User-Agent": USER_AGENT})
             resp.raise_for_status()
             return resp.json().get("elements", [])
@@ -510,6 +519,124 @@ class OverpassSurface:
 # providers (e.g. Indiana DOT LRSE_Surface_Type) plug in here without touching the
 # pipeline. A provider mutates candidate surface fields where it has data and
 # returns a short status note (or None).
+# --------------------------------------------------------------------------- #
+# Fast / multi-lane roads (GAME_PLAN item 4): OSM speed limits and lane counts
+# --------------------------------------------------------------------------- #
+# ORS only knows road class, so a 55 mph two-lane county highway (Gougar Rd near
+# Mokena: ORS suitability 7, same as a quiet county road) looks fine to it. OSM
+# `maxspeed` / `lanes` fill that gap wherever they're mapped (most US suburbs and
+# much of Europe); where they aren't, nothing is penalized.
+FAST_MPH = 45.0         # a 40 mph road (Lincoln Ave, Urbana) is one the owner rides
+MANY_LANES = 4
+ROAD_HIGHWAYS = ("trunk", "trunk_link", "primary", "primary_link", "secondary",
+                 "secondary_link", "tertiary", "tertiary_link", "unclassified",
+                 "residential", "road")
+
+
+def maxspeed_mph(value) -> float | None:
+    """'55 mph' -> 55, '80' (km/h, the OSM default unit) -> 49.7, else None."""
+    import re
+    m = re.match(r"\s*(\d+(?:\.\d+)?)\s*(mph|km/h|kmh|kph)?\s*$", str(value or ""))
+    if not m:
+        return None
+    n = float(m.group(1))
+    return n if m.group(2) == "mph" else n / 1.609344
+
+
+def is_fast_road(tags: dict) -> bool:
+    """A road a cyclist shares with fast or heavy traffic, from its OSM tags."""
+    if (tags.get("highway") or "") not in ROAD_HIGHWAYS:
+        return False
+    mph = maxspeed_mph(tags.get("maxspeed"))
+    try:
+        lanes = int(str(tags.get("lanes", "0")).split(";")[0])
+    except ValueError:
+        lanes = 0
+    return (mph is not None and mph >= FAST_MPH) or lanes >= MANY_LANES
+
+
+def _road_keys(tags: dict) -> set:
+    """Lower-cased name + ref tokens, to tell riding ON a road from a side path."""
+    keys = set()
+    for k in ("name", "ref"):
+        for part in str(tags.get(k) or "").split(";"):
+            part = part.strip().lower()
+            if part:
+                keys.add(part)
+    return keys
+
+
+class FastRoads:
+    """Index of fast / multi-lane roads around some routes, from one Overpass query.
+
+    `fraction(coords, names)` is the share of a route ridden ON such roads. A route
+    stretch counts only when it's within `match_m` of one AND the route's road name
+    (from ORS) matches the OSM name or ref, so a side path beside a fast road (common
+    in suburbs) doesn't count as riding the road.
+    """
+
+    def __init__(self, match_m=15.0, cell_deg=0.003):
+        self.match_m = match_m
+        self.cell_deg = cell_deg
+        self._grid: dict = {}
+        self.way_count = 0
+
+    def _cell(self, lat, lng):
+        return (int(lat // self.cell_deg), int(lng // self.cell_deg))
+
+    def build(self, coords_lists, timeout=12, deadline_s=30):
+        pts = [p for coords in coords_lists for p in coords]
+        if not pts:
+            return self
+        s, w, n, e = _bbox(pts)
+        bb = f"({s},{w},{n},{e})"
+        hw = "|".join(ROAD_HIGHWAYS)
+        # server-side prefilter (numbers >= 40, 4+ lanes); exact test in is_fast_road
+        query = (f"[out:json][timeout:{timeout}];("
+                 f'way["highway"~"^({hw})$"]["maxspeed"~"^([4-9][0-9]|1[0-9][0-9])"]{bb};'
+                 f'way["highway"~"^({hw})$"]["lanes"~"^([4-9]|1[0-9])"]{bb};);'
+                 f"out tags geom;")
+        for el in overpass_json(query, timeout, deadline_s=deadline_s):
+            tags = el.get("tags", {})
+            if not is_fast_road(tags):
+                continue
+            keys = _road_keys(tags)
+            if not keys:
+                continue                      # can't confirm we're on it; don't guess
+            geom = [(g["lat"], g["lon"]) for g in el.get("geometry") or []]
+            for a, b in zip(geom, geom[1:]):
+                for cell in {self._cell(*a), self._cell(*b)}:
+                    self._grid.setdefault(cell, []).append((a, b, keys))
+            self.way_count += 1
+        return self
+
+    def _on_fast(self, p, name):
+        name = (name or "").lower()
+        if not name:
+            return False
+        ci, cj = self._cell(*p)
+        for di in (-1, 0, 1):
+            for dj in (-1, 0, 1):
+                for a, b, keys in self._grid.get((ci + di, cj + dj), ()):
+                    if (_pt_seg_dist_m(p, a, b) <= self.match_m
+                            and any(k in name for k in keys)):
+                        return True
+        return False
+
+    def fraction(self, coords, names) -> float:
+        if len(coords) < 2:
+            return 0.0
+        names = names if names and len(names) == len(coords) else [""] * len(coords)
+        total = fast = 0.0
+        for i, (a, b) in enumerate(zip(coords, coords[1:])):
+            d = _haversine_km(a, b)
+            total += d
+            mid = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+            if self._on_fast(mid, names[i]):
+                fast += d
+        return fast / total if total > 0 else 0.0
+
+
 class SurfaceProvider:
     """Base class for an optional regional surface-data provider.
 

@@ -356,6 +356,15 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   Scored as `W_POOR=1.0` x share beyond `POOR_FREE_FRAC=0.02`; a gentle nudge (top picks
   unchanged in before/after runs). Cards/table "busy road" % shows busy + poor. A
   "quiet" road correction clears it like it clears busy.
+- **Fast roads** (Oct 2026, GAME_PLAN item 4): `planner._apply_fast_roads` builds
+  `surface.FastRoads` (one Overpass read, `deadline_s=30`) and sets
+  `Candidate.fast_road_frac` = share ridden ON roads with OSM `maxspeed` >= 45 mph
+  (`FAST_MPH`) or `lanes` >= 4, minus busy + poor (already charged). "On" means the
+  route's ORS road name contains the OSM name or ref; unnamed OSM ways are ignored,
+  so side paths next to fast roads don't count. 40 mph roads (Lincoln Ave, Urbana)
+  are fine on purpose. Scored `W_FAST=1.0` beyond 2%. Overpass failures leave it at
+  0 with a planner note; `plan_routes(fast_roads=False)` skips it. Refine reuses the
+  index; a "quiet" correction clears it.
 - **Spur trimming** (Oct 2026, GAME_PLAN item 5): `routing._trim_spurs` cuts "ride in and
   straight back out" stretches from every built route except out-and-back (whose return
   is one deliberate retrace). It pairs points at EQUAL DISTANCE before/after a fold (not

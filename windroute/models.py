@@ -92,6 +92,8 @@ class Candidate:
     busy_frac: float = 0.0      # fraction on arterial "State Road" class (US-highways)
     poor_road_frac: float = 0.0 # fraction ORS rates poor for bikes (suitability <= 5) that
                                 # isn't a State Road: the arterials busy_frac misses
+    fast_road_frac: float = 0.0 # fraction on 45+ mph / 4+ lane roads (OSM maxspeed/lanes)
+                                # beyond busy_frac + poor_road_frac (0 if OSM unavailable)
     path_frac: float = 0.0      # fraction on separated bike/foot paths (multiuse trails)
     path_run_frac: float = 0.0  # LONGEST contiguous path run as a fraction of the route
                                 # (the connector-vs-destination signal: a short run is a

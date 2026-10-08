@@ -46,10 +46,11 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
                 ride_area=None, tolerance=3.0, candidates=12, corrections=True,
                 corrections_file=None, api_key=None, n_alternatives=2,
                 location_label=None, classify=False, refine=False,
-                speed=None, near=None) -> PlanResult:
+                speed=None, near=None, fast_roads=True) -> PlanResult:
     """Run the full planning pipeline and return a `PlanResult` (no printing/files).
 
-    `shapes` may be a comma string ("loop,rectangle") or a sequence. `start` is
+    `fast_roads` looks up OSM speed limits / lane counts to penalize fast roads
+    (one Overpass read, skipped quietly if it fails). `shapes` may be a comma string ("loop,rectangle") or a sequence. `start` is
     "now" or a parseable date string. `speed` is your still-air pace in `unit`s
     per hour (default 17 mph; slowed by headwinds, sped up by tailwinds): it times
     the ride so each route is scored on the wind it meets along the way. `near`
@@ -169,6 +170,14 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
         if pnote:
             notes.append(f"surface[{prov.name}]: {pnote}")
 
+    # Fast / multi-lane roads from OSM speed limits and lanes (GAME_PLAN item 4).
+    # Optional: a slow or failed lookup leaves the ranking on ORS road class alone.
+    fast_src = None
+    if fast_roads:
+        note, fast_src = _apply_fast_roads(cands)
+        if note:
+            notes.append(note)
+
     # Graceful degradation: when surface data is thin, say so rather than returning
     # a confidently-wrong gravel estimate.
     data_confidence, conf_note = _surface_confidence(mode, coverage)
@@ -207,7 +216,7 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
             cands, ranked, api_key=api_key, ride_type=ride_type, wind=wind,
             target_km=target_km, tolerance_km=tolerance_km, weights=weights,
             busy_baseline=busy_baseline, osm_src=osm_src, corr_cache=corr_cache,
-            speed_mph=speed_mph)
+            speed_mph=speed_mph, fast_src=fast_src)
         if note:
             notes.append(note)
         if classify and cands:                   # refined geometry can shift the floor
@@ -388,9 +397,31 @@ REFINE_TOP = 2
 REFINE_CALLS_EACH = 5
 
 
+def _apply_fast_roads(cands):
+    """Set each candidate's fast_road_frac from one OSM lookup. Returns (note, src).
+
+    Only the share beyond busy_frac + poor_road_frac is kept, since those already
+    charge the US highways and arterials that are usually fast too. On failure the
+    candidates keep 0 and the note says the check was skipped.
+    """
+    try:
+        src = surface.FastRoads().build([c.coords for c in cands])
+    except Exception:                                     # Overpass down / slow
+        return ("traffic: couldn't check speed limits right now (OpenStreetMap "
+                "lookup failed); ranked on road type only"), None
+    for c in cands:
+        _set_fast(c, src)
+    return "", src
+
+
+def _set_fast(c, src):
+    raw = src.fraction(c.coords, c.road_names)
+    c.fast_road_frac = max(0.0, raw - c.busy_frac - c.poor_road_frac)
+
+
 def _refine_candidates(cands, ranked, *, api_key, ride_type, wind, target_km,
                        tolerance_km, weights, busy_baseline, osm_src, corr_cache,
-                       speed_mph=engine.DEFAULT_RIDE_SPEED_MPH):
+                       speed_mph=engine.DEFAULT_RIDE_SPEED_MPH, fast_src=None):
     """Local-search refine the top few candidates in place (work-plan Task 6).
 
     Builds a full-objective `score_fn` — the SAME OSM overlays + corrections + scoring
@@ -412,6 +443,8 @@ def _refine_candidates(cands, ranked, *, api_key, ride_type, wind, target_km,
             qual = osm_src.classify_quality(c.coords)
             if qual is not None:
                 c.good_gravel_frac, c.unrideable_frac = qual
+        if fast_src is not None:
+            _set_fast(c, fast_src)
         if corr_cache is not None:
             corr_cache.apply(c)
         engine.evaluate([c], wind, ride_type, target_km, tolerance_km,

@@ -220,6 +220,11 @@ W_BUSY = 1.5
 POOR_FREE_FRAC = 0.02
 W_POOR = 1.0
 
+# Fast-road penalty (GAME_PLAN item 4): 45+ mph or 4+ lane roads from OSM, counted
+# only beyond what busy/poor already charge. Same gentle shape as the poor term.
+FAST_FREE_FRAC = 0.02
+W_FAST = 1.0
+
 # Road-ride gravel penalty (linear + convex). `unpaved_frac` upstream counts only
 # surface we have evidence for (unknown defaults to paved), so this punishes gravel
 # we're sure about. The quadratic term makes the penalty bite ever harder as a route
@@ -302,6 +307,8 @@ class RouteWeights:
     busy_free_frac: float = BUSY_FREE_FRAC
     w_poor: float = W_POOR
     poor_free_frac: float = POOR_FREE_FRAC
+    w_fast: float = W_FAST
+    fast_free_frac: float = FAST_FREE_FRAC
     w_path: float = W_PATH
     path_run_free_frac: float = PATH_RUN_FREE_FRAC
     w_bikelane: float = W_BIKELANE
@@ -504,6 +511,7 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
         # tank every route; the quietest available still wins.
         busy_penalty = -max(0.0, c.busy_frac - busy_baseline - w.busy_free_frac)
         poor_penalty = -max(0.0, c.poor_road_frac - w.poor_free_frac)
+        fast_penalty = -max(0.0, c.fast_road_frac - w.fast_free_frac)
         # Penalize only the LONGEST contiguous path run beyond the connector band,
         # so trails used to link roads ride free but a long path stretch doesn't.
         path_penalty = -max(0.0, c.path_run_frac - w.path_run_free_frac)
@@ -516,7 +524,7 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
                             - w.tidy_free_per_km)
         c.total_score = ((w.w_wind * w.wind_scale * wind_norm) + surf_term
                          + (w.w_dist * dist_penalty) + (w.w_busy * busy_penalty)
-                         + (w.w_poor * poor_penalty)
+                         + (w.w_poor * poor_penalty) + (w.w_fast * fast_penalty)
                          + (w.w_path * path_penalty) + (w.w_bikelane * lane_bonus)
                          + (w.w_tidy * tidy_penalty))
 
@@ -542,13 +550,16 @@ def explain(best: Candidate, wind: Wind, ride_type: str) -> str:
         bits.append(f"{best.unpaved_frac * 100:.0f}% known gravel")
     if best.unrideable_frac > 0:
         bits.append(f"{best.unrideable_frac * 100:.0f}% unrideable surface")
-    if best.busy_frac <= BUSY_FREE_FRAC and best.poor_road_frac <= POOR_FREE_FRAC:
+    if (best.busy_frac <= BUSY_FREE_FRAC and best.poor_road_frac <= POOR_FREE_FRAC
+            and best.fast_road_frac <= FAST_FREE_FRAC):
         bits.append("stays on quiet roads")
     else:
         if best.busy_frac > BUSY_FREE_FRAC:
             bits.append(f"{best.busy_frac * 100:.0f}% on busy highways")
         if best.poor_road_frac > POOR_FREE_FRAC:
             bits.append(f"{best.poor_road_frac * 100:.0f}% on busy arterials")
+        if best.fast_road_frac > FAST_FREE_FRAC:
+            bits.append(f"{best.fast_road_frac * 100:.0f}% on fast roads")
     if best.bikelane_frac >= 0.05:
         bits.append(f"{best.bikelane_frac * 100:.0f}% has a bike lane")
     if best.path_frac >= 0.05:
@@ -656,6 +667,8 @@ def _option_reasons(c: Candidate, wind: Wind, ride_type: str, lead: str = None):
         reasons.append(f"{c.busy_frac * 100:.0f}% on busy highways")
     if lead != "quiet" and c.poor_road_frac > POOR_FREE_FRAC:
         reasons.append(f"{c.poor_road_frac * 100:.0f}% on busy arterials")
+    if lead != "quiet" and c.fast_road_frac > FAST_FREE_FRAC:
+        reasons.append(f"{c.fast_road_frac * 100:.0f}% on fast roads (45+ mph or 4+ lanes)")
     if lead != "lanes" and c.bikelane_frac >= 0.05:
         reasons.append(f"{c.bikelane_frac * 100:.0f}% bike lane")
     if c.path_frac >= 0.05:
@@ -677,7 +690,7 @@ def _option_axes(have_lane: bool, target_km: float):
     axes = [
         ("wind", "Stronger wind line", lambda c: c.wind_score, 0.15),
         ("quiet", "Quieter roads",
-         lambda c: -(c.busy_frac + c.poor_road_frac
+         lambda c: -(c.busy_frac + c.poor_road_frac + c.fast_road_frac
                      + 0.5 * max(0.0, c.path_run_frac - PATH_RUN_FREE_FRAC)),
          0.05),
     ]
