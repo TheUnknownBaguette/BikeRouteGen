@@ -141,7 +141,7 @@ windroute/
   regions.py      classify_region -> RegionProfile (terrain archetype): one Overpass read (roads + land-use) + Open-Meteo elevation (relief), cached per ~0.1° cell. classify_archetype() is pure. Diagnostic only so far (work-plan Task 1) — does NOT yet drive weights
   surface.py      OSM/Overpass surface + bike-lane + busy/path + gravel-quality source (OverpassSurface); overpass_json mirror-fallback; SurfaceProvider registry (Task 5)
   corrections.py  personal correction cache (~/.windroute/corrections.json) + road-notes parser
-  rwgps.py        Ride with GPS v1 API client (auth, list/fetch trips, trip cache, creds)
+  rwgps.py        Ride with GPS v1 API client (auth, list/fetch trips, trip cache, creds, route upload)
   learn.py        analyse imported trips -> rider profile + suggested weight changes (pure); geographic clustering + region_mismatch_note + save/load training-region archetype (Task 8)
   render.py       map image + GPX output
   cli.py          CLI front-end: plan / classify / mark / roads-import / corrections / forget / rwgps-login / import / learn
@@ -363,6 +363,23 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   into-the-wind behaviour via historical-wind backfill), and print a profile + suggested
   weight changes. Walks/hikes/indoor auto-excluded (RWGPS `activity_type`/`stationary`);
   `--all-activities` to include. Read-only: never edits weights. See findings below.
+- **Send to Ride with GPS** (Oct 2026): a card button (web) and `plan --to-rwgps best|all`
+  (CLI) upload a route's GPX to Ride with GPS.
+  - **Which account:** the hosted site uploads into a separate **projects** Ride with GPS
+    account (signed up through the owner's project Google account), NOT the owner's
+    personal account. The owner opens those routes from their personal account and sends
+    them to their head unit from there, which only works when the route is **public**, so
+    `rwgps.send_route` sets `visibility="public"` right after each upload (a failure there
+    comes back as a `note`, since the route already exists).
+  - **Render secrets:** `RWGPS_API_KEY` + `RWGPS_AUTH_TOKEN` for the projects account turn
+    the button on (without them it's hidden and `/rwgps/send` 404s). The local
+    `~/.windroute/rwgps.json` from June 2026 is probably the owner's *personal* account, so
+    the projects account needs its own key + token (owner runs `rwgps-login` for it).
+  - **Passphrase is optional** (`RWGPS_SEND_PASSPHRASE`). The owner chose to leave it unset:
+    it's a throwaway account and they're nearly the only user, so flooding isn't a worry.
+    The per-IP rate limit still applies. If junk routes ever show up, set the secret: the
+    button then asks once and keeps it in localStorage (`wr.rwgps.pass`, dropped on a 403).
+  - The server remembers GPX -> route URL, so a second click doesn't make a duplicate.
 - **Corrections cache** (`mark` / `corrections` / `forget`): record personal ground
   truth (a road is really gravel / really busy) via GPX, points, or `--between`/`--to`;
   applied on top of surface data on every plan.
@@ -561,6 +578,9 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   keys (`y`=lat, `x`=lng, `e`=elev) — parsed defensively. `departed_at` is **tz-aware**;
   `get_wind_historical` strips it to naive local (Open-Meteo `timezone=auto` is naive) or
   subtraction with `datetime.now()` raises.
+  **Route upload** (`POST /routes.json`) is multipart only and async: 202 + a task, poll
+  `/tasks/{id}.json` until `completed`, the route id is in `items[].item_id`. Visibility
+  can't be set on upload (account default); `PUT /routes/{id}.json` can change it later.
 - **`learn` is slow at scale:** one Overpass + one historical-wind call per trip (~0.5s+
   paced). Use `learn --no-surface` for a fast geometry/distance/direction pass; full `learn`
   for surface/path-run/lane/wind. Shape comes from RWGPS `track_type` (not the computed

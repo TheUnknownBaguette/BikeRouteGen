@@ -252,3 +252,4 @@ database), and handling token refresh. Revisit when there's demand.
 | Date | Item | Status / notes |
 |------|------|----------------|
 | 2026-10-08 | all | Plan written; nothing started |
+| 2026-10-08 | 2 | **Built.** `rwgps.upload_route` / `wait_for_task` / `send_route`; web `POST /rwgps/send` (passphrase, rate limit, one upload per GPX); card button + `static/rwgps.js`; CLI `plan --to-rwgps best\|all`; `tests/test_rwgps_send.py`. Owner's answers: one button per route; uploads go to a separate projects account and are set **public** (owner copies/sends them from their personal account); passphrase optional and left unset. Not yet tried against the live API: needs the projects account's key + token as Render secrets, then check the cue sheet question on the first real upload |

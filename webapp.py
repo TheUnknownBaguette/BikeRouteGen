@@ -13,6 +13,7 @@ OpenRouteService key from ORS_API_KEY, exactly like the CLI.
 from __future__ import annotations
 
 import datetime as dt
+import hmac
 import logging
 import math
 import os
@@ -26,7 +27,7 @@ from urllib.parse import urlencode
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
-from windroute import engine, render, planner
+from windroute import engine, render, planner, rwgps
 
 app = Flask(__name__)
 # Cache-buster for our own CSS/JS: changes on every (re)start, i.e. every deploy, so
@@ -262,6 +263,8 @@ def plan():
     unit = "km" if f.get("unit", "mi") == "km" else "mi"
     per_unit = 1.0 if unit == "km" else 1.0 / 1.609344
     wind = result.wind
+    pace = _clamp(f.get("speed", 17), 3, 40, 17)
+    when_str = f"{result.when:%a %b} {result.when.day}, {_clock(result.when)}"
 
     # Every ranked candidate gets a card, a map line and a GPX: the recommended +
     # alternatives first (each with its headline), then the rest in rank order.
@@ -294,7 +297,16 @@ def plan():
             "path_pct": c.path_frac * 100, "lane_pct": c.bikelane_frac * 100,
             "unrideable_pct": c.unrideable_frac * 100, "score": c.total_score,
             "gpx": f"{base.name}.gpx", "dlname": f"{dlnames[i]}.gpx",
+            "rw_name": f"{result.when:%b} {result.when.day} · {dist_num} {unit} "
+                       f"{c.shape} · {headline}",
         })
+        routes[-1]["rw_desc"] = "\n".join(x for x in [
+            result.location_label,
+            f"Planned for {when_str} at {pace:g} {'km/h' if unit == 'km' else 'mph'}",
+            f"Wind: {wind_line}",
+            f"About {ride_time}, +{c.ascent_m:.0f} m climbing" if ride_time else "",
+            "Made with windroute",
+        ] if x)
         meta = [f"{dist_num} {unit}", ride_time, f"+{c.ascent_m:.0f} m", wind_line]
         card = routes[-1]
         map_routes.append({
@@ -308,7 +320,6 @@ def plan():
 
     # "Edit plan" goes back to the form with exactly these inputs.
     edit_pairs = [("edit", "1")] + list(f.items(multi=True))
-    pace = _clamp(f.get("speed", 17), 3, 40, 17)
     dist = _clamp(f.get("distance", 0), 1, 200, 30)
     meta = (f"{dist:g} {unit} {ride_type} · "
             f"{pace:g} {'km/h' if unit == 'km' else 'mph'} pace")
@@ -322,7 +333,6 @@ def plan():
                 "deg": round(wind.direction_from_deg), "mph": round(wind.speed_mph, 1),
                 "gust": round(wind.gust_mph, 1), "known": wind.known,
                 "when": _clock(valid) if valid else wind.valid_time}
-    when_str = f"{result.when:%a %b} {result.when.day}, {_clock(result.when)}"
     timeline = _wind_timeline(result, order)
     # Everything the map (and a share link) needs, as one JSON blob in the page.
     payload = {
@@ -338,7 +348,8 @@ def plan():
         "results.html", label=result.location_label, when_str=when_str,
         meta=meta, unit=unit, ride_type=ride_type, wind=wind_ctx,
         timeline=timeline, notes=notes, warnings=warnings, routes=routes,
-        payload=payload, edit_url="/?" + urlencode(edit_pairs))
+        payload=payload, edit_url="/?" + urlencode(edit_pairs),
+        rwgps=_rwgps_config())
 
 
 @app.route("/share")
@@ -412,6 +423,63 @@ def _wind_timeline(result, order):
                     "mph": round(mph, 1), "from": engine.compass_label(deg),
                     "h": round((t - result.when).total_seconds() / 3600, 3)})
     return out
+
+
+# "Send to Ride with GPS" uploads into one account (the owner's separate projects
+# account), so it only exists when the host has that account's API key + auth token
+# (Render secrets). RWGPS_SEND_PASSPHRASE is optional: set it and the button asks for it,
+# so visitors of the public site can't fill the account. Uploads are made public so the
+# owner's personal account can open and copy them.
+GPX_NAME = re.compile(r"^[0-9a-f]{8}-\d{1,2}\.gpx$")
+_rwgps_sent: dict[str, str] = {}         # gpx file -> route url, so a re-click can't duplicate
+
+
+def _rwgps_config():
+    """(api_key, auth_token, passphrase or "") when sending is set up, else None."""
+    creds = rwgps.Credentials.load()
+    phrase = os.environ.get("RWGPS_SEND_PASSPHRASE", "")
+    return (creds.api_key, creds.auth_token, phrase) if creds.ok else None
+
+
+@app.route("/rwgps/send", methods=["POST"])
+def rwgps_send():
+    """Upload one generated GPX to the owner's Ride with GPS account."""
+    cfg = _rwgps_config()
+    if cfg is None:
+        return jsonify(error="Sending to Ride with GPS isn't set up on this site."), 404
+    api_key, auth_token, phrase = cfg
+    body = request.get_json(silent=True) or {}
+    if _rate_limited("rwgps:" + _client_ip()):
+        return jsonify(error="Too many tries. Wait a few minutes."), 429
+    given = str(body.get("passphrase", ""))
+    if phrase and not hmac.compare_digest(given.encode(), phrase.encode()):
+        return jsonify(error="Wrong passphrase.", passphrase=True), 403
+    gpx = str(body.get("gpx", ""))
+    if not GPX_NAME.match(gpx):
+        return jsonify(error="Unknown route."), 400
+    if gpx in _rwgps_sent:
+        return jsonify(url=_rwgps_sent[gpx])
+    path = OUT_DIR / gpx
+    if not path.is_file():
+        return jsonify(error="This route has expired. Plan it again to send it."), 410
+    name = str(body.get("name", "")).strip()[:120] or "windroute route"
+    desc = str(body.get("description", "")).strip()[:2000]
+    try:
+        route = rwgps.send_route(api_key, auth_token, path.read_bytes(), name, desc,
+                                 filename=str(body.get("filename", gpx))[:80])
+    except rwgps.RwgpsError as exc:
+        app.logger.warning("rwgps send failed: %s", exc)
+        msg = str(exc)
+        if "HTTP 401" in msg or "HTTP 403" in msg:
+            msg = "Ride with GPS refused the saved login. The auth token may need renewing."
+        elif "HTTP" in msg:
+            msg = "Ride with GPS returned an error. Try again in a bit."
+        return jsonify(error=msg[:300]), 502
+    except Exception:
+        app.logger.exception("rwgps send failed")
+        return jsonify(error="Couldn't reach Ride with GPS. Try again in a bit."), 502
+    _rwgps_sent[gpx] = route["url"]
+    return jsonify(url=route["url"], note=route.get("note", ""))
 
 
 @app.route("/download/<path:name>")

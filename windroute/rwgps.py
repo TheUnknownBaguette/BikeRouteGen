@@ -1,9 +1,9 @@
 """Ride with GPS API client (v1).
 
 A pure HTTP layer over the Ride with GPS API: exchange a login for a long-lived
-auth token, page through your recorded *trips*, fetch a trip's track, and pull
-the bits we care about out of the JSON. No printing, no scoring — a front-end
-calls these and feeds the results to `learn`.
+auth token, page through your recorded *trips*, fetch a trip's track, pull
+the bits we care about out of the JSON, and upload a planned route. No
+printing, no scoring — a front-end calls these and feeds the results to `learn`.
 
 Auth (personal single-user use → Basic auth):
   1. Create an API client at https://ridewithgps.com/settings/developers to get
@@ -25,6 +25,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
@@ -164,6 +165,117 @@ def get_trip(api_key: str, auth_token: str, trip_id, timeout: int = DEFAULT_TIME
     data = _get(f"trips/{trip_id}.json", api_key, auth_token, timeout=timeout)
     # Detail is usually wrapped: {trip: {...}}.
     return _first(data, "trip", default=data)
+
+
+# --------------------------------------------------------------------------- #
+# Routes: upload a planned route (GPX) into the account
+# --------------------------------------------------------------------------- #
+RWGPS_WEB = "https://ridewithgps.com"
+TASK_FAILED = {"failed", "error", "errored", "cancelled", "canceled"}
+
+
+def upload_route(api_key: str, auth_token: str, gpx_bytes: bytes, name: str,
+                 description: str = "", filename: str = "route.gpx",
+                 timeout: int = DEFAULT_TIMEOUT) -> dict:
+    """Start a route import from a GPX file. Returns the task dict.
+
+    `POST /routes.json` is multipart only and asynchronous: it answers 202 with a
+    pending task; `wait_for_task` turns that into the new route. Visibility can't
+    be set here (it follows the account's default route privacy); `update_route`
+    changes it afterwards.
+    """
+    url = f"{RWGPS_BASE}/routes.json"
+    r = requests.post(url, headers=_headers(api_key, auth_token),
+                      files={"file": (filename, gpx_bytes, "application/gpx+xml")},
+                      data={"name": name[:128], "description": description},
+                      timeout=timeout)
+    data = _json_or_raise(r, url)
+    task = _first(data, "task", default=data)
+    if not isinstance(task, dict) or _first(task, "id") is None:
+        raise RwgpsError(f"no task in upload response: {json.dumps(data)[:300]}")
+    return task
+
+
+def get_task(api_key: str, auth_token: str, task_id,
+             timeout: int = DEFAULT_TIMEOUT) -> dict:
+    data = _get(f"tasks/{task_id}.json", api_key, auth_token, timeout=timeout)
+    return _first(data, "task", default=data)
+
+
+def _task_route(task: dict) -> dict | None:
+    """The created route ({id, url}) from a finished task, or None if not there yet."""
+    for item in _first(task, "items", default=[]) or []:
+        if not isinstance(item, dict):
+            continue
+        if (item.get("item_type") or "route").lower() != "route":
+            continue
+        rid = _first(item, "item_id", "id")
+        if rid is not None:
+            return {"id": rid, "url": f"{RWGPS_WEB}/routes/{rid}"}
+    return None
+
+
+def wait_for_task(api_key: str, auth_token: str, task: dict, max_wait_s: float = 30,
+                  interval_s: float = 1.0, sleep=time.sleep) -> dict:
+    """Poll an upload task until it finishes; return the new route {id, url}.
+
+    Raises RwgpsError if the import fails (with the API's error codes) or doesn't
+    finish within `max_wait_s`.
+    """
+    waited = 0.0
+    while True:
+        status = str(_first(task, "status", default="")).lower()
+        errors = _first(task, "errors", default=[]) or []
+        if status in TASK_FAILED or (errors and status != "pending"):
+            codes = ", ".join(str(_first(e, "code", "message", default=e))
+                              if isinstance(e, dict) else str(e) for e in errors)
+            raise RwgpsError(f"Ride with GPS couldn't import the route"
+                             f"{': ' + codes if codes else ''}")
+        if status == "completed":
+            route = _task_route(task)
+            if route:
+                return route
+            raise RwgpsError(f"import finished but no route came back: "
+                             f"{json.dumps(task)[:300]}")
+        if waited >= max_wait_s:
+            raise RwgpsError("Ride with GPS is still importing the route; check your "
+                             "routes list in a minute")
+        sleep(interval_s)
+        waited += interval_s
+        task = get_task(api_key, auth_token, task["id"])
+
+
+def update_route(api_key: str, auth_token: str, route_id, timeout: int = DEFAULT_TIMEOUT,
+                 **fields) -> dict:
+    """Change a route's name / description / visibility / activity_types / archived.
+
+    Only the fields given are sent. Visibility is `public`, `followers_only`,
+    `mutual_followers_only` or `private`. A bad value is a 422 and nothing changes.
+    """
+    url = f"{RWGPS_BASE}/routes/{route_id}.json"
+    r = requests.put(url, headers=_headers(api_key, auth_token),
+                     json={"route": fields}, timeout=timeout)
+    data = _json_or_raise(r, url)
+    return _first(data, "route", default=data)
+
+
+def send_route(api_key: str, auth_token: str, gpx_bytes: bytes, name: str,
+               description: str = "", filename: str = "route.gpx",
+               max_wait_s: float = 30, visibility: str | None = "public") -> dict:
+    """Upload a GPX as a new route and wait for it. Returns {id, url}.
+
+    Then sets `visibility` (public by default, so another account can open and copy
+    the route; None leaves the account default). The route already exists by then,
+    so a failed visibility change is reported in `note` rather than raised.
+    """
+    task = upload_route(api_key, auth_token, gpx_bytes, name, description, filename)
+    route = wait_for_task(api_key, auth_token, task, max_wait_s=max_wait_s)
+    if visibility:
+        try:
+            update_route(api_key, auth_token, route["id"], visibility=visibility)
+        except RwgpsError:
+            route["note"] = f"Added, but couldn't set it to {visibility}"
+    return route
 
 
 # --------------------------------------------------------------------------- #

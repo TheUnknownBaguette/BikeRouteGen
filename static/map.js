@@ -357,10 +357,11 @@
     cards.forEach(function (c) {
       var id = +c.getAttribute("data-route");
       c.addEventListener("click", function (e) {
-        if (e.target.closest("a")) return;              // the GPX link
+        if (e.target.closest("a, button")) return;      // GPX link, send button
         select(id, { from: "card" });
       });
       c.addEventListener("keydown", function (e) {
+        if (e.target.closest("a, button")) return;
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(id, { from: "card" }); }
       });
     });

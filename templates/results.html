@@ -34,6 +34,13 @@
       <a class="btn sm primary" href="{{ url_for('download', name=r.gpx) }}" download="{{ r.dlname }}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
         Download GPX</a>
+      {% if rwgps %}
+      <button type="button" class="btn sm rwgps-send" data-gpx="{{ r.gpx }}" data-file="{{ r.dlname }}"
+              data-pass="{{ '1' if rwgps[2] else '' }}"
+              data-name="{{ r.rw_name }}" data-desc="{{ r.rw_desc }}" title="Add this route to your Ride with GPS account">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V7M7 12l5-5 5 5M5 3h14"/></svg>
+        Send to Ride with GPS</button>
+      {% endif %}
     </div>
   </div>
 {%- endmacro %}
@@ -147,4 +154,5 @@
   <script src="{{ url_for('static', filename='share.js', v=asset_v) }}"></script>
   <script src="{{ url_for('static', filename='wind.js', v=asset_v) }}"></script>
   <script src="{{ url_for('static', filename='map.js', v=asset_v) }}"></script>
+  {% if rwgps %}<script src="{{ url_for('static', filename='rwgps.js', v=asset_v) }}"></script>{% endif %}
 {% endblock %}

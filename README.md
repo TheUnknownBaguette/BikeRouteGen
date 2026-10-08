@@ -151,6 +151,11 @@ On a free host like [Render](https://render.com):
    **Start command:** `waitress-serve --listen=*:$PORT webapp:app`
 4. Add an environment variable **`ORS_API_KEY`** = your key (mark it secret).
 5. Deploy, then share the service URL.
+6. Optional, **Send to Ride with GPS** buttons on the route cards: add the secrets
+   `RWGPS_API_KEY` and `RWGPS_AUTH_TOKEN` (the same pair `rwgps-login` takes). Routes go
+   into *that* account and are made public, so a separate account just for this works
+   well. Add `RWGPS_SEND_PASSPHRASE` too if you want the button to ask for a passphrase
+   before anyone can use it.
 
 `waitress` (in `requirements.txt`) is the production server; `webapp.py` reads the
 host/port from the environment, so nothing in the code changes between local and
@@ -241,6 +246,7 @@ python -m windroute.cli plan -l "Asheville, NC" -d 30 --classify
 | `--candidates` | How many routes to generate and rank (default 12; more = better odds, slower, more API calls). |
 | `-o, --out` | Output file basename. Omit to auto-name each file by date/distance/shape/wind (e.g. `jun14-30mi-loop-Swind.gpx`); pass a name to force `<name>.*` / `<name>-alt1.*`. |
 | `--api-key` | ORS key override (normally read from `ORS_API_KEY`). |
+| `--to-rwgps best\|all` | Also add the recommended route (or all three) to your Ride with GPS account (login from `rwgps-login`). |
 
 ### Terrain-aware tuning (`--classify`)
 
@@ -345,7 +351,7 @@ windroute/
   zones.py        auto-detect a quiet riding zone, by direction or nearest (for --ride-area)
   surface.py      OpenStreetMap/Overpass surface + bike-lane + gravel-quality source; provider registry
   corrections.py  the personal "I rode this" correction cache + road-notes parser
-  rwgps.py        Ride with GPS API client (for the `learn` command's trip history)
+  rwgps.py        Ride with GPS API client (trip history for `learn`; route upload)
   learn.py        analyse imported trips -> rider profile + per-region clusters + suggested weight changes
   render.py       map image + GPX output
   cli.py          the CLI wrapper (typer + rich)

@@ -256,7 +256,7 @@ details.more > .inner { padding: 4px 14px 16px; }
 .rcard .why { display: none; margin: 10px 0 0; padding: 0 0 0 16px; color: var(--dim); font-size: 12.5px; }
 .rcard .why li { margin: 2px 0; }
 .rcard.active .why { display: block; }
-.rcard .acts { display: none; gap: 8px; margin: 12px 0 0; }
+.rcard .acts { display: none; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 .rcard.active .acts { display: flex; }
 .rcard.compact { padding-top: 11px; padding-bottom: 11px; }
 .rcard.compact .name { font-size: 14px; }

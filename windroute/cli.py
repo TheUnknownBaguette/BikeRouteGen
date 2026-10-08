@@ -14,6 +14,7 @@ from typing import List
 import typer
 from dateutil import parser as dateparser
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.progress import Progress
 from rich.table import Table
@@ -107,9 +108,25 @@ def plan(
              "calls; off by default."),
     api_key: str = typer.Option(None, "--api-key", envvar="ORS_API_KEY",
                                 help="OpenRouteService key (or set ORS_API_KEY)."),
+    to_rwgps: str = typer.Option(
+        None, "--to-rwgps",
+        help="Also add routes to your Ride with GPS account: 'best' (the "
+             "recommended route) or 'all' (all three options). Uses the login "
+             "saved by 'rwgps-login'."),
 ):
     """Plan a route, rank candidates by wind + surface, write image + GPX."""
     ride_type = ride_type.lower().strip()
+    creds = None
+    if to_rwgps:
+        to_rwgps = to_rwgps.lower().strip()
+        if to_rwgps not in ("best", "all"):
+            console.print("[red]--to-rwgps takes 'best' or 'all'.[/]")
+            raise typer.Exit(code=2)
+        creds = rwgps.Credentials.load()
+        if not creds.ok:
+            console.print("[red]Not logged in to Ride with GPS. Run 'rwgps-login' "
+                          "first (or set RWGPS_API_KEY + RWGPS_AUTH_TOKEN).[/]")
+            raise typer.Exit(code=2)
     try:
         with console.status("[cyan]Planning your route (wind, candidates, scoring)\u2026"):
             result = planner.plan_routes(
@@ -161,8 +178,12 @@ def plan(
             tag = ("[bold green]RECOMMENDED[/]" if opt.role == "recommended"
                    else f"[bold cyan]Option {i + 1}[/]")
             reasons = "\n".join(f"     - {r}" for r in opt.reasons)
+            sent = ""
+            if creds and (to_rwgps == "all" or i == 0):
+                sent = "\n     " + _send_to_rwgps(creds, gpx, c, opt, when, unit,
+                                                  label, wind)
             blocks.append(f"{tag}  [bold]{opt.headline}[/]\n{reasons}\n"
-                          f"     [dim]{png}  |  {gpx}[/]")
+                          f"     [dim]{png}  |  {gpx}[/]{sent}")
 
         if mode == "both" and "osm" in best.surface_by_source:
             delta = abs(best.surface_by_source["osm"] - best.surface_by_source.get("ors", 0.0))
@@ -179,6 +200,25 @@ def plan(
     except Exception as exc:                                    # surface a clean message
         console.print(Panel(str(exc), title="[bold red]Error", border_style="red"))
         raise typer.Exit(code=1)
+
+
+def _send_to_rwgps(creds, gpx_path, c, opt, when, unit, label, wind) -> str:
+    """Upload one written GPX to Ride with GPS; returns a markup line for the panel."""
+    per = 1.0 if unit == "km" else 1.0 / 1.609344
+    name = (f"{when:%b} {when.day} · {c.distance_km * per:.1f} {unit} "
+            f"{c.shape} · {opt.headline}")
+    desc = "\n".join(x for x in [
+        label, f"Planned for {when:%a %b} {when.day}, {when:%H:%M}",
+        f"Wind: {engine.wind_summary(c)}" if wind.known else "",
+        "Made with windroute"] if x)
+    try:
+        with console.status("[cyan]Sending to Ride with GPS…"):
+            route = rwgps.send_route(creds.api_key, creds.auth_token,
+                                     Path(gpx_path).read_bytes(), name, desc,
+                                     filename=Path(gpx_path).name)
+    except rwgps.RwgpsError as exc:
+        return f"[red]Ride with GPS: {escape(str(exc))}[/]"
+    return f"[green]Ride with GPS:[/] {route['url']}"
 
 
 @app.command()
