@@ -4,6 +4,10 @@
 This file is the single source of truth for what the project is, what's built, and
 the non-obvious decisions behind it. Keep it updated when you finish a feature.
 
+**Current work:** `GAME_PLAN.md` (Oct 2026) — the agreed next steps (Ride with GPS upload,
+personal heatmap, traffic counts, bike-suitability, routability), with API facts, ground
+rules and the owner's open questions. Start there when picking up new work.
+
 ---
 
 ## What it is
