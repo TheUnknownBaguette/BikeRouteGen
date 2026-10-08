@@ -303,4 +303,6 @@ class CorrectionCache:
         if traf_d > 0:
             uncorrected = total - traf_d
             candidate.busy_frac = (traf_busy + candidate.busy_frac * uncorrected) / total
+            # a marked road is fully described by the mark (busy -> busy_frac above)
+            candidate.poor_road_frac = candidate.poor_road_frac * uncorrected / total
         return surf_d, traf_d

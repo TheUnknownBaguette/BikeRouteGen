@@ -347,7 +347,15 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
 - **Road gravel penalty:** linear + convex on confirmed `unpaved_frac` — a half-gravel
   "road" route can't be saved by a great wind line. Only penalizes KNOWN gravel.
 - **Busy-highway avoidance:** penalizes time on ORS waytype 1 ("State Road" = US-highways)
-  beyond a 5% free band. `busy_frac`, "Hwy %" column.
+  beyond a 5% free band. `busy_frac`; the "Hwy %" column shows busy + poor (below).
+- **Bike-suitability / busy arterials** (Oct 2026): every ORS call also asks for the
+  `suitability` extra (0-10 bike rating). `Candidate.poor_road_frac` = share rated
+  <= `SUIT_POOR_MAX` (5) that is NOT a State Road, so US highways aren't charged twice.
+  Calibrated on real plans: big arterials (Cermak, Roosevelt, Mannheim, Laraway, US
+  52/150) are 5, streets 8, paths 9, rural county roads 7 (good riding: NOT penalized).
+  Scored as `W_POOR=1.0` x share beyond `POOR_FREE_FRAC=0.02`; a gentle nudge (top picks
+  unchanged in before/after runs). Cards/table "busy road" % shows busy + poor. A
+  "quiet" road correction clears it like it clears busy.
 - **Bike paths** (separated multiuse trails, ORS waytype 4/6/7): penalty is on the
   **longest *contiguous* path run** (`path_run_frac`) beyond `PATH_RUN_FREE_FRAC` (0.25),
   NOT total path mileage — the owner uses trails as connectors to reach good riding, not

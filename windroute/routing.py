@@ -104,6 +104,12 @@ BUSY_WAYTYPES = {1}
 # handled separately via OverpassSurface + bikelane_frac.
 PATH_WAYTYPES = {4, 6, 7}
 
+# ORS "suitability" extra: a 0-10 bike rating per stretch (10 = best). Calibrated on
+# real plans (2026-10-08, Mokena / Oak Park / Champaign): ordinary streets are 8,
+# paths 9, rural county roads 7 (good riding, keep), and the big arterials 5
+# (Cermak, Roosevelt, Laraway, Duncan, US 52/150 ...). Nothing scored below 5.
+SUIT_POOR_MAX = 5
+
 
 # --------------------------------------------------------------------------- #
 # Route generation (OpenRouteService, needs a free API key)
@@ -161,20 +167,22 @@ def _strip_backtracks(coords, eles=None, tol_m=5.0, names=None):
 def _ors_directions(api_key, profile, coordinates, timeout):
     """One ORS directions call over an explicit list of through-waypoints.
 
-    Returns (coords, eles, dist_km, paved, unpaved, busy, path, path_run_km, names).
+    Returns (coords, eles, dist_km, paved, unpaved, busy, path, path_run_km, names,
+    poor).
     `coordinates` is ORS-order [[lng, lat], ...]. All route shapes are built from
     explicit geometric waypoints (see the _make_* builders), so no ORS round_trip
     is used. `busy` is the fraction of distance on arterial "State Road" class
     (US-highways); `path` is the fraction on separated bike/foot paths (multiuse
     trails); `path_run_km` is the longest *contiguous* path stretch (km) on this leg;
     `names` is the road name for the stretch leaving each point (from ORS's turn-by-
-    turn steps), which `cues.make_cues` turns into a cue sheet.
+    turn steps), which `cues.make_cues` turns into a cue sheet; `poor` is the fraction
+    ORS rates poor for bikes that ISN'T already a busy State Road (see `_poor_fraction`).
     """
     url = ORS_URL.format(profile=profile)
     headers = {"Authorization": api_key, "Content-Type": "application/json"}
     body = {
         "coordinates": coordinates,
-        "extra_info": ["surface", "waytype"],
+        "extra_info": ["surface", "waytype", "suitability"],
         "elevation": True,
         "instructions": True,             # only for the road names (cue sheet)
     }
@@ -201,13 +209,14 @@ def _ors_directions(api_key, profile, coordinates, timeout):
     # geometry BEFORE stripping stubs (which would shift the indices).
     path_run_km = _waytype_run_km(extras, coords, PATH_WAYTYPES)
     names = _step_names(props, len(coords))
+    poor = _poor_fraction(extras, coords)
     # Drop the little A->B->A spurs ORS sometimes emits; subtract their mileage
     # from the ORS road distance so the reported length matches the cleaned line.
     clean, eles, names = _strip_backtracks(coords, eles, names=names)
     if len(clean) != len(coords):
         dist_km = max(0.0, dist_km - (_polyline_km(coords) - _polyline_km(clean)))
         coords = clean
-    return coords, eles, dist_km, paved, unpaved, busy, path, path_run_km, names
+    return coords, eles, dist_km, paved, unpaved, busy, path, path_run_km, names, poor
 
 
 def _step_names(props, n):
@@ -273,11 +282,11 @@ def _make_polygon_loop(api_key, profile, lat, lng, target_km, bearing, timeout,
     tangles, or perpendicular spurs by construction."""
     verts = _polygon_loop_waypoints(lat, lng, target_km, bearing, n_sides, orient, detour)
     pts = [[vlng, vlat] for vlat, vlng in verts]                    # -> ORS [lng, lat]
-    coords, eles, dist, paved, unpaved, busy, path, path_run, names = _ors_directions(
+    coords, eles, dist, paved, unpaved, busy, path, path_run, names, poor = _ors_directions(
         api_key, profile, pts, timeout)
     return Candidate(coords=coords, distance_km=dist,
                      ascent_m=_smoothed_ascent(eles) if eles else 0.0,
-                     paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
+                     paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy, poor_road_frac=poor,
                      path_frac=path, path_run_frac=(path_run / dist if dist else 0.0),
                      shape="loop", eles=eles or None, waypoints=list(verts),
                      road_names=names)
@@ -287,7 +296,7 @@ def _make_out_back(api_key, profile, lat, lng, target_km, bearing, timeout, deto
     """Route to a point ~target/2 away on `bearing`, then mirror the path home."""
     crow_km = (target_km / 2.0) / detour                         # roads aren't straight
     dlat, dlng = _destination(lat, lng, bearing, crow_km)
-    coords, eles, dist, paved, unpaved, busy, path, path_run, names = _ors_directions(
+    coords, eles, dist, paved, unpaved, busy, path, path_run, names, poor = _ors_directions(
         api_key, profile, [[lng, lat], [dlng, dlat]], timeout)
     full_coords = coords + coords[-2::-1]                        # out + reversed (no dup turn)
     full_eles = (eles + eles[-2::-1]) if eles else []
@@ -297,7 +306,7 @@ def _make_out_back(api_key, profile, lat, lng, target_km, bearing, timeout, deto
     # "riding the path as the destination" case this should flag.
     return Candidate(coords=full_coords, distance_km=dist * 2.0,
                      ascent_m=_smoothed_ascent(full_eles) if full_eles else 0.0,
-                     paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
+                     paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy, poor_road_frac=poor,
                      path_frac=path, path_run_frac=(path_run / dist if dist else 0.0),
                      shape="out-and-back", eles=full_eles or None, road_names=full_names)
 
@@ -319,7 +328,7 @@ def _make_lollipop(api_key, profile, lat, lng, target_km, bearing, seed,
     crow_km = stem_oneway / detour
     dlat, dlng = _destination(lat, lng, bearing, crow_km)
 
-    s_coords, s_eles, s_dist, s_pav, s_unp, s_busy, s_path, s_run, s_names = _ors_directions(
+    s_coords, s_eles, s_dist, s_pav, s_unp, s_busy, s_path, s_run, s_names, s_poor = _ors_directions(
         api_key, profile, [[lng, lat], [dlng, dlat]], timeout)
 
     # Anchor the candy at the stem's real end node, and route it as a polygon loop.
@@ -328,7 +337,7 @@ def _make_lollipop(api_key, profile, lat, lng, target_km, bearing, seed,
         glat, glng, loop_km, bearing,
         n_sides=loop_sides[seed % len(loop_sides)],
         orient=(1 if (seed // len(loop_sides)) % 2 == 0 else -1), detour=loop_detour)
-    l_coords, l_eles, l_dist, l_pav, l_unp, l_busy, l_path, l_run, l_names = _ors_directions(
+    l_coords, l_eles, l_dist, l_pav, l_unp, l_busy, l_path, l_run, l_names, l_poor = _ors_directions(
         api_key, profile, [[vlng, vlat] for vlat, vlng in verts], timeout)
 
     full_coords = s_coords + l_coords[1:] + s_coords[-2::-1]     # stem + candy + stem back
@@ -342,11 +351,12 @@ def _make_lollipop(api_key, profile, lat, lng, target_km, bearing, seed,
     paved = (s_pav * stem_w + l_pav * loop_w) / tot if tot else 1.0
     unpaved = (s_unp * stem_w + l_unp * loop_w) / tot if tot else 0.0
     busy = (s_busy * stem_w + l_busy * loop_w) / tot if tot else 0.0
+    poor = (s_poor * stem_w + l_poor * loop_w) / tot if tot else 0.0
     path = (s_path * stem_w + l_path * loop_w) / tot if tot else 0.0
     path_run = max(s_run, l_run) / total_dist if total_dist else 0.0   # longest single run
     return Candidate(coords=full_coords, distance_km=total_dist,
                      ascent_m=_smoothed_ascent(full_eles) if full_eles else 0.0,
-                     paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
+                     paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy, poor_road_frac=poor,
                      path_frac=path, path_run_frac=path_run, shape="lollipop",
                      eles=full_eles or None, road_names=full_names)
 
@@ -384,13 +394,13 @@ def _make_staging(api_key, profile, lat, lng, target_km, zone, seed,
     stem_crow = max(0.5, crow - radius)
     tlat, tlng = _destination(lat, lng, bearing, stem_crow)      # stem target (near zone edge)
 
-    s_coords, s_eles, s_dist, s_pav, s_unp, s_busy, s_path, s_run, s_names = _ors_directions(
+    s_coords, s_eles, s_dist, s_pav, s_unp, s_busy, s_path, s_run, s_names, s_poor = _ors_directions(
         api_key, profile, [[lng, lat], [tlng, tlat]], timeout)
 
     # Anchor the loop at the stem's real end node and bulge it toward the zone.
     glat, glng = s_coords[-1]
     verts = _polygon_loop_waypoints(glat, glng, loop_km, bearing, n_sides, orient, loop_detour)
-    l_coords, l_eles, l_dist, l_pav, l_unp, l_busy, l_path, l_run, l_names = _ors_directions(
+    l_coords, l_eles, l_dist, l_pav, l_unp, l_busy, l_path, l_run, l_names, l_poor = _ors_directions(
         api_key, profile, [[vlng, vlat] for vlat, vlng in verts], timeout)
 
     full_coords = s_coords + l_coords[1:] + s_coords[-2::-1]     # stem + loop + stem back
@@ -404,11 +414,12 @@ def _make_staging(api_key, profile, lat, lng, target_km, zone, seed,
     paved = (s_pav * stem_w + l_pav * loop_w) / tot if tot else 1.0
     unpaved = (s_unp * stem_w + l_unp * loop_w) / tot if tot else 0.0
     busy = (s_busy * stem_w + l_busy * loop_w) / tot if tot else 0.0
+    poor = (s_poor * stem_w + l_poor * loop_w) / tot if tot else 0.0
     path = (s_path * stem_w + l_path * loop_w) / tot if tot else 0.0
     path_run = max(s_run, l_run) / total_dist if total_dist else 0.0   # longest single run
     return Candidate(coords=full_coords, distance_km=total_dist,
                      ascent_m=_smoothed_ascent(full_eles) if full_eles else 0.0,
-                     paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
+                     paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy, poor_road_frac=poor,
                      path_frac=path, path_run_frac=path_run, shape="staging",
                      eles=full_eles or None, score_coords=l_coords, road_names=full_names)
 
@@ -433,12 +444,12 @@ def _make_rectangle(api_key, profile, lat, lng, target_km, bearing, timeout,
     c_lat, c_lng = _destination(lat, lng, cross, width_crow)      # near end, offset
     pts = [[lng, lat], [a_lng, a_lat], [b_lng, b_lat], [c_lng, c_lat], [lng, lat]]
 
-    coords, eles, dist, paved, unpaved, busy, path, path_run, names = _ors_directions(
+    coords, eles, dist, paved, unpaved, busy, path, path_run, names, poor = _ors_directions(
         api_key, profile, pts, timeout)
     verts = [(lat, lng), (a_lat, a_lng), (b_lat, b_lng), (c_lat, c_lng), (lat, lng)]
     return Candidate(coords=coords, distance_km=dist,
                      ascent_m=_smoothed_ascent(eles) if eles else 0.0,
-                     paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
+                     paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy, poor_road_frac=poor,
                      path_run_frac=(path_run / dist if dist else 0.0),
                      path_frac=path, shape="rectangle", eles=eles or None, waypoints=verts,
                      road_names=names)
@@ -452,11 +463,11 @@ def _candidate_from_waypoints(api_key, profile, waypoints, shape, timeout):
     route can be nudged again.
     """
     pts = [[lng, lat] for lat, lng in waypoints]                    # -> ORS [lng, lat]
-    coords, eles, dist, paved, unpaved, busy, path, path_run, names = _ors_directions(
+    coords, eles, dist, paved, unpaved, busy, path, path_run, names, poor = _ors_directions(
         api_key, profile, pts, timeout)
     return Candidate(coords=coords, distance_km=dist,
                      ascent_m=_smoothed_ascent(eles) if eles else 0.0,
-                     paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
+                     paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy, poor_road_frac=poor,
                      path_frac=path, path_run_frac=(path_run / dist if dist else 0.0),
                      shape=shape, eles=eles or None, waypoints=list(waypoints),
                      road_names=names)
@@ -604,10 +615,12 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
     # bounded thread pool collapses ~12 sequential calls into a few batches (within
     # the free tier's burst). Results are slotted back into plan order so the route
     # set AND its tie-break ordering are identical to the serial path; a seed that
-    # 404s/HTTPErrors is skipped, exactly as before. `workers=1` == fully serial.
+    # 404s/HTTPErrors, times out or drops its connection is skipped, keeping the rest.
+    # `workers=1` == fully serial.
     slots = [None] * len(specs)
     pool = max(1, min(workers, len(specs))) if specs else 1
     access_error = None
+    rate_limited = False
     with concurrent.futures.ThreadPoolExecutor(max_workers=pool) as ex:
         futures = {ex.submit(_build, shape, idx): pos
                    for pos, (shape, idx) in enumerate(specs)}
@@ -616,8 +629,9 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
                 continue
             try:
                 slots[futures[fut]] = fut.result()
-            except requests.HTTPError:
-                pass                              # skip a bad seed/bearing, keep the rest
+            except requests.RequestException as exc:   # bad seed, timeout, dropped
+                resp = getattr(exc, "response", None)     # connection: skip, keep the rest
+                rate_limited = rate_limited or (resp is not None and resp.status_code == 429)
             except OrsAccessError as exc:         # the key itself was refused: every
                 access_error = access_error or exc     # other call will fail too
                 for other in futures:
@@ -626,6 +640,9 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
     if access_error is not None and not out:
         raise access_error
 
+    if not out and rate_limited:
+        raise RuntimeError("The routing service is getting too many requests right now "
+                           "(OpenRouteService rate limit). Wait a minute and try again.")
     if not out:
         raise RuntimeError("No routes came back. Check the API key, or that the start "
                            "point is on a routable road and distance <= 100 km.")
@@ -668,6 +685,46 @@ def _waytype_fraction(extras, codes):
         if int(item["value"]) in codes:
             matched += dist
     return matched / total if total > 0 else 0.0
+
+
+def _segment_values(extra, nseg):
+    """Per-segment value from a positional ORS extra ([start, end, value] over coords),
+    or None when the extra is missing."""
+    if not extra or not extra.get("values"):
+        return None
+    out = [None] * nseg
+    for entry in extra["values"]:
+        try:
+            s, e, v = int(entry[0]), int(entry[1]), int(entry[2])
+        except (TypeError, ValueError, IndexError):
+            continue
+        for i in range(max(0, s), min(nseg, e)):
+            out[i] = v
+    return out
+
+
+def _poor_fraction(extras, coords):
+    """Fraction of distance ORS rates poor for bikes (suitability <= SUIT_POOR_MAX)
+    on roads that are NOT busy State Roads.
+
+    Those State Roads are already in `busy_frac`, so this is the extra signal:
+    arterials the waytype class misses (county highways, city arterials). Counting
+    only them keeps a US highway from being penalized twice. 0.0 with no data.
+    """
+    nseg = len(coords) - 1
+    if nseg < 1:
+        return 0.0
+    suit = _segment_values(extras.get("suitability"), nseg)
+    if suit is None:
+        return 0.0
+    wt = _segment_values(extras.get("waytype"), nseg) or [None] * nseg
+    total = poor = 0.0
+    for i in range(nseg):
+        d = _haversine_km(coords[i], coords[i + 1])
+        total += d
+        if suit[i] is not None and suit[i] <= SUIT_POOR_MAX and wt[i] not in BUSY_WAYTYPES:
+            poor += d
+    return poor / total if total > 0 else 0.0
 
 
 def _waytype_run_km(extras, coords, codes):

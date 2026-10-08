@@ -299,7 +299,9 @@ def plan():
             "dist_num": dist_num, "climb": f"{c.ascent_m:.0f} m", "ride_time": ride_time,
             "verdict": engine.wind_verdict(c), "wind_score": c.wind_score,
             "wind_line": wind_line, "reasons": _card_reasons(opt.reasons if opt else [], unit),
-            "gravel_pct": c.unpaved_frac * 100, "hwy_pct": c.busy_frac * 100,
+            "gravel_pct": c.unpaved_frac * 100,
+            # busy highways + the arterials ORS rates poor for bikes: both are "busy road"
+            "hwy_pct": (c.busy_frac + c.poor_road_frac) * 100,
             "path_pct": c.path_frac * 100, "lane_pct": c.bikelane_frac * 100,
             "unrideable_pct": c.unrideable_frac * 100, "score": c.total_score,
             "gpx": f"{base.name}.gpx", "dlname": f"{dlnames[i]}.gpx",

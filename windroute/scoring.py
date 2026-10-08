@@ -211,6 +211,15 @@ def wind_verdict(c: Candidate) -> str:
 BUSY_FREE_FRAC = 0.05
 W_BUSY = 1.5
 
+# Poor-for-bikes penalty: roads ORS rates <= 5/10 that aren't State Roads (city and
+# county arterials the busy class misses). A lighter weight than W_BUSY because the
+# rating is coarser than "this is a US highway". Free band 2% (vs 5% for busy): 5%
+# of a 25 mi ride is over a mile on something like Cermak. Before/after on real
+# plans (2026-10-08): Mokena / Oak Park unchanged, Naperville moved one 7%-arterial
+# route from #4 to #6; top picks unchanged everywhere — it nudges, it doesn't upend.
+POOR_FREE_FRAC = 0.02
+W_POOR = 1.0
+
 # Road-ride gravel penalty (linear + convex). `unpaved_frac` upstream counts only
 # surface we have evidence for (unknown defaults to paved), so this punishes gravel
 # we're sure about. The quadratic term makes the penalty bite ever harder as a route
@@ -291,6 +300,8 @@ class RouteWeights:
     w_dist: float = 0.5                # distance-excess penalty coefficient
     w_busy: float = W_BUSY
     busy_free_frac: float = BUSY_FREE_FRAC
+    w_poor: float = W_POOR
+    poor_free_frac: float = POOR_FREE_FRAC
     w_path: float = W_PATH
     path_run_free_frac: float = PATH_RUN_FREE_FRAC
     w_bikelane: float = W_BIKELANE
@@ -492,6 +503,7 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
         # baseline (Task 4a) and the free band — so unavoidable arterials don't
         # tank every route; the quietest available still wins.
         busy_penalty = -max(0.0, c.busy_frac - busy_baseline - w.busy_free_frac)
+        poor_penalty = -max(0.0, c.poor_road_frac - w.poor_free_frac)
         # Penalize only the LONGEST contiguous path run beyond the connector band,
         # so trails used to link roads ride free but a long path stretch doesn't.
         path_penalty = -max(0.0, c.path_run_frac - w.path_run_free_frac)
@@ -504,6 +516,7 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
                             - w.tidy_free_per_km)
         c.total_score = ((w.w_wind * w.wind_scale * wind_norm) + surf_term
                          + (w.w_dist * dist_penalty) + (w.w_busy * busy_penalty)
+                         + (w.w_poor * poor_penalty)
                          + (w.w_path * path_penalty) + (w.w_bikelane * lane_bonus)
                          + (w.w_tidy * tidy_penalty))
 
@@ -529,10 +542,13 @@ def explain(best: Candidate, wind: Wind, ride_type: str) -> str:
         bits.append(f"{best.unpaved_frac * 100:.0f}% known gravel")
     if best.unrideable_frac > 0:
         bits.append(f"{best.unrideable_frac * 100:.0f}% unrideable surface")
-    if best.busy_frac <= BUSY_FREE_FRAC:
+    if best.busy_frac <= BUSY_FREE_FRAC and best.poor_road_frac <= POOR_FREE_FRAC:
         bits.append("stays on quiet roads")
     else:
-        bits.append(f"{best.busy_frac * 100:.0f}% on busy highways")
+        if best.busy_frac > BUSY_FREE_FRAC:
+            bits.append(f"{best.busy_frac * 100:.0f}% on busy highways")
+        if best.poor_road_frac > POOR_FREE_FRAC:
+            bits.append(f"{best.poor_road_frac * 100:.0f}% on busy arterials")
     if best.bikelane_frac >= 0.05:
         bits.append(f"{best.bikelane_frac * 100:.0f}% has a bike lane")
     if best.path_frac >= 0.05:
@@ -638,6 +654,8 @@ def _option_reasons(c: Candidate, wind: Wind, ride_type: str, lead: str = None):
         reasons.append(f"{c.unrideable_frac * 100:.0f}% unrideable surface (avoided)")
     if lead != "quiet" and c.busy_frac > BUSY_FREE_FRAC:
         reasons.append(f"{c.busy_frac * 100:.0f}% on busy highways")
+    if lead != "quiet" and c.poor_road_frac > POOR_FREE_FRAC:
+        reasons.append(f"{c.poor_road_frac * 100:.0f}% on busy arterials")
     if lead != "lanes" and c.bikelane_frac >= 0.05:
         reasons.append(f"{c.bikelane_frac * 100:.0f}% bike lane")
     if c.path_frac >= 0.05:
@@ -659,7 +677,8 @@ def _option_axes(have_lane: bool, target_km: float):
     axes = [
         ("wind", "Stronger wind line", lambda c: c.wind_score, 0.15),
         ("quiet", "Quieter roads",
-         lambda c: -(c.busy_frac + 0.5 * max(0.0, c.path_run_frac - PATH_RUN_FREE_FRAC)),
+         lambda c: -(c.busy_frac + c.poor_road_frac
+                     + 0.5 * max(0.0, c.path_run_frac - PATH_RUN_FREE_FRAC)),
          0.05),
     ]
     if have_lane:

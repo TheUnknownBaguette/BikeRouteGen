@@ -23,7 +23,7 @@ class _Resp:
     def raise_for_status(self):
         import requests
         if self.status_code >= 400:
-            raise requests.HTTPError(f"{self.status_code}")
+            raise requests.HTTPError(f"{self.status_code}", response=self)
 
 
 def _plan_with(resp, workers=1):
@@ -63,6 +63,34 @@ def test_unroutable_points_still_give_the_old_message():
     exc, _ = _plan_with(_Resp(404, {"error": {"code": 2010, "message": "Could not find routable point"}}))
     assert isinstance(exc, RuntimeError) and not isinstance(exc, routing.OrsAccessError)
     assert "No routes came back" in str(exc)
+
+
+def test_rate_limit_says_wait_a_minute():
+    saved = routing.time.sleep
+    routing.time.sleep = lambda s: None           # skip the 429 back-off pause
+    try:
+        exc, _ = _plan_with(_Resp(429, {"error": "Rate Limit Exceeded"}))
+    finally:
+        routing.time.sleep = saved
+    assert isinstance(exc, RuntimeError) and "Wait a minute" in str(exc)
+
+
+def test_dropped_connection_is_skipped_not_a_crash():
+    import requests
+    saved = routing.requests.post
+
+    def boom(*a, **k):
+        raise requests.ConnectionError("Connection aborted.")
+    routing.requests.post = boom
+    try:
+        routing.generate_candidates(41.52, -87.89, 48.0, "road", "KEY", n=4,
+                                    shapes=("loop",), into_wind_bearing=270.0, workers=2)
+    except Exception as exc:
+        assert type(exc) is RuntimeError and "No routes came back" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+    finally:
+        routing.requests.post = saved
 
 
 if __name__ == "__main__":

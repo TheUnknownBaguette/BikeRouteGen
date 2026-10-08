@@ -271,7 +271,7 @@ def mark(
             with console.status("[cyan]Routing the road for your correction…"):
                 lat1, lng1, lbl1 = engine.geocode(between)
                 lat2, lng2, lbl2 = engine.geocode(to)
-                road, _e, _d, _p, _u, _b, _pa, _pr, _n = engine._ors_directions(
+                road, _e, _d, _p, _u, _b, _pa, _pr, _n, _po = engine._ors_directions(
                     api_key, profile, [[lng1, lat1], [lng2, lat2]], timeout=40)
             coords = downsample(road)
             origin = f"{lbl1} -> {lbl2}"
@@ -887,9 +887,10 @@ def _candidates_table(ranked, ride_type, compare=False, show_lane=False):
             if c.unrideable_frac:
                 cell += f" [red]!{c.unrideable_frac * 100:.0f}[/]"
             row.append(cell)
-        hwy_pct = c.busy_frac * 100
-        hwy_cell = (f"{hwy_pct:.0f}" if c.busy_frac <= engine.BUSY_FREE_FRAC
-                    else f"[yellow]{hwy_pct:.0f}[/]" if c.busy_frac < 0.20
+        busy = c.busy_frac + c.poor_road_frac           # highways + poor-for-bike arterials
+        hwy_pct = busy * 100
+        hwy_cell = (f"{hwy_pct:.0f}" if busy <= engine.BUSY_FREE_FRAC
+                    else f"[yellow]{hwy_pct:.0f}[/]" if busy < 0.20
                     else f"[red]{hwy_pct:.0f}[/]")
         row.append(hwy_cell)
         # Path %: mildly disliked multiuse trails (yellow as they grow).
