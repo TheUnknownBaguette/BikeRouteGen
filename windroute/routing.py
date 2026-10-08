@@ -36,7 +36,10 @@ def _count_ors_call():
         _ORS_CALLS += 1
 
 
-ORS_URL = "https://api.openrouteservice.org/v2/directions/{profile}/geojson"
+# HeiGIT moved the ORS API from api.openrouteservice.org to api.heigit.org/openrouteservice
+# (Oct 2026). The old host now answers every request with 403 "Quota exceeded", even
+# with quota left — if that reappears with a full dashboard, check for another move.
+ORS_URL = "https://api.heigit.org/openrouteservice/v2/directions/{profile}/geojson"
 
 
 class OrsAccessError(RuntimeError):

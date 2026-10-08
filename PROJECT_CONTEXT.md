@@ -590,6 +590,11 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   Keep `strict-origin-when-cross-origin` (sends only the origin, never route params) and use
   `tile.openstreetmap.org` (the `{s}.` a/b/c subdomains are deprecated). The CSP `img-src`
   must list every tile host (OSM, `*.tile-cyclosm.openstreetmap.fr`, `*.tile.opentopomap.org`).
+- **ORS moved hosts (Oct 2026):** the API is now `api.heigit.org/openrouteservice/v2/...`
+  (`routing.ORS_URL`). The old `api.openrouteservice.org` answers 403 `"Quota exceeded"`
+  even when the dashboard shows full quota — so if that error shows up with quota left,
+  suspect another URL change before blaming usage. The dashboard is still at
+  openrouteservice.org/dev.
 - **CARTO basemaps now need an API key** — their keyless tiles come back stamped
   "API KEY REQUIRED" with HTTP 200, so tile-error fallbacks never fire. Don't reintroduce.
 - **The ride/wind model exists twice:** `wind.js` ports `WindField` lookup and
