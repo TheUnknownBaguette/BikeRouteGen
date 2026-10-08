@@ -38,6 +38,36 @@ def _count_ors_call():
 
 ORS_URL = "https://api.openrouteservice.org/v2/directions/{profile}/geojson"
 
+
+class OrsAccessError(RuntimeError):
+    """OpenRouteService refused the API key itself (quota used up, or a bad key).
+
+    Unlike a per-route failure (an unroutable waypoint, which just drops that
+    candidate), every further call would fail the same way, so generation stops
+    and the rider is told what actually happened instead of "no routes came back".
+    It's a RuntimeError, so the CLI and web app already show its message.
+    """
+
+
+ORS_QUOTA_MSG = ("The routing service's daily limit has been used up "
+                 "(OpenRouteService free plan: 2,000 route requests a day, and each plan "
+                 "uses about 12-15). It resets within 24 hours - try again later.")
+ORS_KEY_MSG = ("The routing service rejected the API key. Check that ORS_API_KEY is set "
+               "to a valid OpenRouteService key.")
+
+
+def _check_ors_access(resp):
+    """Raise OrsAccessError when ORS rejected the key rather than the route."""
+    if resp.status_code not in (401, 403):
+        return
+    try:
+        text = str(resp.json().get("error", ""))
+    except ValueError:
+        text = resp.text or ""
+    if "quota" in text.lower():
+        raise OrsAccessError(ORS_QUOTA_MSG)
+    raise OrsAccessError(ORS_KEY_MSG)
+
 # Ride type -> ORS cycling profile. Road rides use "cycling-regular" rather than
 # "cycling-road" on purpose: cycling-road hard-avoids multiuse paths and bike
 # lanes (it kept us off the paved Hickory Creek trail entirely — 0% vs 72% on
@@ -144,6 +174,7 @@ def _ors_directions(api_key, profile, coordinates, timeout):
     if resp.status_code == 429:                  # rate limited — back off once
         time.sleep(2.5)
         resp = requests.post(url, json=body, headers=headers, timeout=timeout)
+    _check_ors_access(resp)                      # quota used up / bad key: stop, say so
     resp.raise_for_status()
 
     feat = resp.json()["features"][0]
@@ -421,6 +452,8 @@ def refine_candidate(cand, api_key, profile, target_km, tolerance_km, score_fn,
                 except requests.HTTPError:
                     calls += 1
                     continue
+                except OrsAccessError:                    # quota ran out mid-refine:
+                    return best, calls + 1                # keep what we have
                 calls += 1
                 if abs(cand2.distance_km - target_km) > allowed_dev:
                     continue
@@ -525,15 +558,24 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
     # 404s/HTTPErrors is skipped, exactly as before. `workers=1` == fully serial.
     slots = [None] * len(specs)
     pool = max(1, min(workers, len(specs))) if specs else 1
+    access_error = None
     with concurrent.futures.ThreadPoolExecutor(max_workers=pool) as ex:
         futures = {ex.submit(_build, shape, idx): pos
                    for pos, (shape, idx) in enumerate(specs)}
         for fut in concurrent.futures.as_completed(futures):
+            if fut.cancelled():                   # skipped after a refused key
+                continue
             try:
                 slots[futures[fut]] = fut.result()
             except requests.HTTPError:
                 pass                              # skip a bad seed/bearing, keep the rest
+            except OrsAccessError as exc:         # the key itself was refused: every
+                access_error = access_error or exc     # other call will fail too
+                for other in futures:
+                    other.cancel()                # don't fire the ones not yet started
     out = [c for c in slots if c is not None]
+    if access_error is not None and not out:
+        raise access_error
 
     if not out:
         raise RuntimeError("No routes came back. Check the API key, or that the start "
