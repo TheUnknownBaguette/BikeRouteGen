@@ -13,6 +13,7 @@ front-end to display however it likes.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import datetime as dt
 from dataclasses import dataclass, field
 
@@ -81,6 +82,9 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
                      f"start, drop a pin on the map.")
     if location_label:                    # caller picked an exact point; keep its name
         label = location_label
+    # The speed-limit lookup only needs the start and the ride's reach, so it runs
+    # in the background while the wind and the routes are fetched.
+    fast_job = _start_fast_roads(lat, lng, target_km) if fast_roads else None
     wind = engine.get_wind(lat, lng, when, radius_km=target_km)
     if not wind.known:
         notes.append("wind: couldn't fetch a forecast for this location — planned "
@@ -174,7 +178,7 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
     # Optional: a slow or failed lookup leaves the ranking on ORS road class alone.
     fast_src = None
     if fast_roads:
-        note, fast_src = _apply_fast_roads(cands)
+        note, fast_src = _apply_fast_roads(cands, fast_job)
         if note:
             notes.append(note)
 
@@ -397,15 +401,36 @@ REFINE_TOP = 2
 REFINE_CALLS_EACH = 5
 
 
-def _apply_fast_roads(cands):
-    """Set each candidate's fast_road_frac from one OSM lookup. Returns (note, src).
+# Background lookups that must not hold the plan up (the OSM speed-limit read).
+_background = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+FAST_REACH_FRAC = 0.4        # loops/lollipops/rectangles stay within ~0.35 x distance
+FAST_WAIT_S = 5.0            # once routes are ready, wait at most this for the lookup;
+                             # a slower one keeps going and is cached for the next plan
 
-    Only the share beyond busy_frac + poor_road_frac is kept, since those already
-    charge the US highways and arterials that are usually fast too. On failure the
-    candidates keep 0 and the note says the check was skipped.
+
+def _start_fast_roads(lat, lng, target_km):
+    return _background.submit(surface.fast_roads_near, lat, lng,
+                              target_km * FAST_REACH_FRAC + 1.0)
+
+
+def _apply_fast_roads(cands, job=None):
+    """Set each candidate's fast_road_frac from the OSM lookup. Returns (note, src).
+
+    `job` is the lookup started early (`_start_fast_roads`); a route that leaves its
+    area (a staged ride) gets one more lookup covering every route. Only the share
+    beyond busy_frac + poor_road_frac is kept, since those already charge the US
+    highways and arterials that are usually fast too. On failure the candidates
+    keep 0 and the note says the check was skipped.
     """
     try:
-        src = surface.FastRoads().build([c.coords for c in cands])
+        src = job.result(timeout=FAST_WAIT_S) if job is not None else None
+        if src is None or not all(src.covers(c.coords) for c in cands):
+            pts = [p for c in cands for p in c.coords]
+            src = surface.cached_fast_roads(*surface._bbox(pts),
+                                            deadline_s=10 if job is not None else 30)
+    except concurrent.futures.TimeoutError:
+        return ("traffic: speed limits are still loading, so this plan is ranked on "
+                "road type only (the next plan here will have them)"), None
     except Exception:                                     # Overpass down / slow
         return ("traffic: couldn't check speed limits right now (OpenStreetMap "
                 "lookup failed); ranked on road type only"), None

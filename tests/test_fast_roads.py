@@ -32,6 +32,7 @@ SIDEPATH = [(lat, -87.89988) for lat, _ in GOUGAR]
 
 
 def _stub_overpass(elements):
+    surface.clear_fast_cache()                     # each test sees only its own stub
     saved = surface.overpass_json
     surface.overpass_json = lambda *a, **k: elements
     return lambda: setattr(surface, "overpass_json", saved)
@@ -73,6 +74,7 @@ def test_overpass_failure_leaves_ranking_alone():
     def down(*a, **k):
         raise RuntimeError("504")
     surface.overpass_json = down
+    surface.clear_fast_cache()
     c = engine.Candidate(coords=GOUGAR, distance_km=1.1, ascent_m=0, paved_frac=1,
                          unpaved_frac=0, road_names=["Gougar Road"] * len(GOUGAR))
     try:
@@ -80,6 +82,43 @@ def test_overpass_failure_leaves_ranking_alone():
     finally:
         surface.overpass_json = saved
     assert src is None and c.fast_road_frac == 0.0 and "couldn't check" in note
+
+
+def test_lookup_is_cached_for_the_area():
+    calls = []
+    restore = _stub_overpass([_gougar_way(maxspeed="55 mph")])
+    real = surface.overpass_json
+    surface.overpass_json = lambda *a, **k: calls.append(1) or real(*a, **k)
+    try:
+        a = surface.fast_roads_near(41.505, -87.90, 5.0)
+        b = surface.fast_roads_near(41.506, -87.90, 4.0)      # replan, inside the same area
+        c = surface.cached_fast_roads(41.501, -87.901, 41.509, -87.899)
+    finally:
+        restore()
+        surface.clear_fast_cache()
+    assert len(calls) == 1 and a is b is c
+
+
+def test_a_slow_lookup_does_not_hold_up_the_plan():
+    import concurrent.futures
+    import threading
+    import time
+    gate = threading.Event()
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    job = pool.submit(gate.wait, 5)                   # a lookup that hasn't come back
+    c = engine.Candidate(coords=GOUGAR, distance_km=1.1, ascent_m=0, paved_frac=1,
+                         unpaved_frac=0, road_names=["Gougar Road"] * len(GOUGAR))
+    saved = planner.FAST_WAIT_S
+    planner.FAST_WAIT_S = 0.2
+    t = time.monotonic()
+    try:
+        note, src = planner._apply_fast_roads([c], job)
+    finally:
+        planner.FAST_WAIT_S = saved
+        gate.set()
+        pool.shutdown()
+    assert time.monotonic() - t < 1.0
+    assert src is None and c.fast_road_frac == 0.0 and "still loading" in note
 
 
 if __name__ == "__main__":

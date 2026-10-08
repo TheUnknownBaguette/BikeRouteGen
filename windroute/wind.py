@@ -4,6 +4,8 @@ from __future__ import annotations
 import datetime as dt
 import math
 import re
+import threading
+import time
 
 import requests
 
@@ -22,6 +24,9 @@ ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 FIELD_RING_POINTS = 6
 FIELD_RING_FRAC = 1.0 / 3.0
 FIELD_RING_MIN_KM = 3.0
+FIELD_RING_STEP_KM = 5.0     # ring radius rounded to this, so replans at a nearby
+                             # distance reuse the cached forecast (wind barely changes
+                             # over a few km)
 FIELD_HOURS_BEFORE = 1        # hours of forecast kept before the start ...
 FIELD_HOURS_AFTER = 12        # ... and after it (covers a 100 km ride at any pace)
 
@@ -59,30 +64,64 @@ def get_wind(lat: float, lng: float, when: dt.datetime,
                     valid_time="", known=False)
 
 
+# A forecast is reused for this long by any plan from (nearly) the same start and
+# reach: replans and "Edit plan" skip the fetch. Open-Meteo updates hourly.
+FORECAST_CACHE_TTL_S = 20 * 60
+FORECAST_CACHE_MAX = 64
+_forecast_cache: dict = {}                    # key -> (stored_at, hourlies)
+_forecast_lock = threading.Lock()
+OPEN_METEO_TIMEOUT_S = 6     # it answers in ~1 s; a slow moment is better retried
+OPEN_METEO_TRIES = 2
+
+
+def _open_meteo_hourlies(points):
+    key = tuple((round(a, 3), round(b, 3)) for a, b in points)
+    now = time.monotonic()
+    with _forecast_lock:
+        hit = _forecast_cache.get(key)
+        if hit and now - hit[0] < FORECAST_CACHE_TTL_S:
+            return hit[1]
+    last = None
+    for _ in range(OPEN_METEO_TRIES):
+        try:
+            r = requests.get(
+                FORECAST_URL,
+                params={
+                    # Open-Meteo takes comma-separated coordinates for several
+                    # locations in one request and returns a list (one per location).
+                    "latitude": ",".join(f"{p[0]:.4f}" for p in points),
+                    "longitude": ",".join(f"{p[1]:.4f}" for p in points),
+                    "hourly": "wind_speed_10m,wind_direction_10m,wind_gusts_10m",
+                    "wind_speed_unit": "mph",
+                    "timezone": "auto",
+                    "forecast_days": 7,
+                },
+                timeout=OPEN_METEO_TIMEOUT_S,
+            )
+            r.raise_for_status()
+            data = r.json()
+            break
+        except requests.RequestException as exc:
+            last = exc
+    else:
+        raise last
+    hourlies = [d["hourly"] for d in (data if isinstance(data, list) else [data])]
+    with _forecast_lock:
+        _forecast_cache[key] = (time.monotonic(), hourlies)
+        if len(_forecast_cache) > FORECAST_CACHE_MAX:
+            del _forecast_cache[min(_forecast_cache, key=lambda k: _forecast_cache[k][0])]
+    return hourlies
+
+
 def _wind_from_open_meteo(lat: float, lng: float, when: dt.datetime,
                          radius_km: float = None) -> Wind:
     points = [(lat, lng)]
     if radius_km:
-        ring = max(FIELD_RING_MIN_KM, radius_km * FIELD_RING_FRAC)
+        ring = max(FIELD_RING_MIN_KM, round(radius_km * FIELD_RING_FRAC
+                                            / FIELD_RING_STEP_KM) * FIELD_RING_STEP_KM)
         points += [_destination(lat, lng, i * 360.0 / FIELD_RING_POINTS, ring)
                    for i in range(FIELD_RING_POINTS)]
-    r = requests.get(
-        FORECAST_URL,
-        params={
-            # Open-Meteo takes comma-separated coordinates for several locations
-            # in one request and then returns a list (one object per location).
-            "latitude": ",".join(f"{p[0]:.4f}" for p in points),
-            "longitude": ",".join(f"{p[1]:.4f}" for p in points),
-            "hourly": "wind_speed_10m,wind_direction_10m,wind_gusts_10m",
-            "wind_speed_unit": "mph",
-            "timezone": "auto",
-            "forecast_days": 7,
-        },
-        timeout=20,
-    )
-    r.raise_for_status()
-    data = r.json()
-    hourlies = [d["hourly"] for d in (data if isinstance(data, list) else [data])]
+    hourlies = _open_meteo_hourlies(points)
     w = _wind_from_hourly(hourlies[0], when)
     w.field = _field_from_hourlies(points, hourlies, when)
     return w
@@ -124,10 +163,10 @@ def _wind_from_nws(lat: float, lng: float, when: dt.datetime) -> Wind:
     """
     headers = {"User-Agent": USER_AGENT, "Accept": "application/geo+json"}
     pt = requests.get(f"https://api.weather.gov/points/{lat:.4f},{lng:.4f}",
-                      headers=headers, timeout=20)
+                      headers=headers, timeout=10)
     pt.raise_for_status()
     hourly_url = pt.json()["properties"]["forecastHourly"]
-    fc = requests.get(hourly_url, headers=headers, timeout=20)
+    fc = requests.get(hourly_url, headers=headers, timeout=10)
     fc.raise_for_status()
     periods = fc.json().get("properties", {}).get("periods") or []
     if not periods:

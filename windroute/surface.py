@@ -13,7 +13,7 @@ so a front-end can fall back to the ORS baseline.
 from __future__ import annotations
 
 import math
-
+import threading
 import time
 
 import requests
@@ -580,6 +580,7 @@ class FastRoads:
         self.cell_deg = cell_deg
         self._grid: dict = {}
         self.way_count = 0
+        self.bbox = None                      # (s, w, n, e) this index covers
 
     def _cell(self, lat, lng):
         return (int(lat // self.cell_deg), int(lng // self.cell_deg))
@@ -588,7 +589,16 @@ class FastRoads:
         pts = [p for coords in coords_lists for p in coords]
         if not pts:
             return self
-        s, w, n, e = _bbox(pts)
+        return self.build_bbox(*_bbox(pts), timeout=timeout, deadline_s=deadline_s)
+
+    def covers(self, coords) -> bool:
+        if self.bbox is None:
+            return False
+        s, w, n, e = self.bbox
+        return all(s <= lat <= n and w <= lng <= e for lat, lng in coords)
+
+    def build_bbox(self, s, w, n, e, timeout=12, deadline_s=30):
+        self.bbox = (s, w, n, e)
         bb = f"({s},{w},{n},{e})"
         hw = "|".join(ROAD_HIGHWAYS)
         # server-side prefilter (numbers >= 40, 4+ lanes); exact test in is_fast_road
@@ -635,6 +645,47 @@ class FastRoads:
             if self._on_fast(mid, names[i]):
                 fast += d
         return fast / total if total > 0 else 0.0
+
+
+# Speed limits barely change, so one area's index is reused for a day by every plan
+# that fits inside it (replans, edits, other riders nearby). Areas are snapped out
+# to a grid so slightly different starts share an entry.
+FAST_CACHE_TTL_S = 24 * 3600
+FAST_CACHE_MAX = 16
+FAST_SNAP_DEG = 0.05
+_fast_cache: list = []                        # [(stored_at, FastRoads)], newest last
+_fast_lock = threading.Lock()
+
+
+def clear_fast_cache():
+    with _fast_lock:
+        _fast_cache.clear()
+
+
+def cached_fast_roads(s, w, n, e, deadline_s=30) -> FastRoads:
+    """A FastRoads index covering the box, from the cache or one Overpass read."""
+    now = time.monotonic()
+    with _fast_lock:
+        _fast_cache[:] = [(t, src) for t, src in _fast_cache if now - t < FAST_CACHE_TTL_S]
+        for t, src in reversed(_fast_cache):
+            bs, bw, bn, be = src.bbox
+            if bs <= s and bw <= w and bn >= n and be >= e:
+                return src
+    snap = FAST_SNAP_DEG
+    box = (math.floor(s / snap) * snap, math.floor(w / snap) * snap,
+           math.ceil(n / snap) * snap, math.ceil(e / snap) * snap)
+    src = FastRoads().build_bbox(*box, deadline_s=deadline_s)
+    with _fast_lock:
+        _fast_cache.append((time.monotonic(), src))
+        del _fast_cache[:-FAST_CACHE_MAX]
+    return src
+
+
+def fast_roads_near(lat, lng, reach_km, deadline_s=30) -> FastRoads:
+    """Fast-road index for everywhere a ride of this reach from (lat, lng) can go."""
+    dlat = reach_km / 111.32
+    dlng = reach_km / (111.32 * max(0.2, math.cos(math.radians(lat))))
+    return cached_fast_roads(lat - dlat, lng - dlng, lat + dlat, lng + dlng, deadline_s)
 
 
 class SurfaceProvider:

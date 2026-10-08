@@ -365,6 +365,18 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   are fine on purpose. Scored `W_FAST=1.0` beyond 2%. Overpass failures leave it at
   0 with a planner note; `plan_routes(fast_roads=False)` skips it. Refine reuses the
   index; a "quiet" correction clears it.
+- **Plan speed** (Oct 2026): a slow plan was ~35 s, almost all of it waiting on outside
+  services (Open-Meteo 17.8 s and Overpass 11.6 s in a bad moment; ORS ~4-5 s; our code
+  ~0.5 s). Now: (1) the speed-limit lookup starts right after geocoding for the ride's
+  reach (`planner._start_fast_roads`, 0.4 x distance + 1 km) and runs alongside wind +
+  ORS; after the routes are ready the plan waits at most `FAST_WAIT_S` (5 s) and a
+  slower lookup keeps running to fill the cache. (2) Caches shared by every plan in
+  the process: speed limits per area for 24 h (`surface.cached_fast_roads`, boxes
+  snapped to 0.05 deg), Open-Meteo forecasts for 20 min (`wind._open_meteo_hourlies`;
+  the wind ring radius is rounded to 5 km so replans at a nearby distance hit it).
+  (3) Open-Meteo gets two 6 s tries, NWS fallback calls 10 s. Typical plan now ~6-9 s,
+  mostly ORS. NOT done: the hosted site sleeping after 15 idle minutes on Render's
+  free tier (30-60 s first visit); fix is a paid tier or an outside pinger.
 - **Spur trimming** (Oct 2026, GAME_PLAN item 5): `routing._trim_spurs` cuts "ride in and
   straight back out" stretches from every built route except out-and-back (whose return
   is one deliberate retrace). It pairs points at EQUAL DISTANCE before/after a fold (not
