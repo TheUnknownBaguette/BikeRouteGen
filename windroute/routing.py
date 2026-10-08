@@ -119,7 +119,7 @@ _LOOP_SIDES = (5, 4, 6, 5, 4, 6)
 _BEARING_OFFSETS = [0, 30, -30, 60, -60, 90, -90, 135, -135, 180]
 
 
-def _strip_backtracks(coords, eles=None, tol_m=5.0):
+def _strip_backtracks(coords, eles=None, tol_m=5.0, names=None):
     """Remove immediate out-and-back stubs from a single routed leg.
 
     ORS round_trip/directions occasionally routes a short spur onto a side road
@@ -135,7 +135,8 @@ def _strip_backtracks(coords, eles=None, tol_m=5.0):
     staging concatenation. A deliberate retrace (out leg + reversed out leg) looks
     exactly like one giant backtrack, so cleaning the *assembled* route would
     collapse the whole return. `eles` (if the same length as `coords`) is filtered
-    in lockstep so the two stay aligned. Returns (coords, eles).
+    in lockstep so the two stay aligned, and so is `names` when given (then the
+    return is (coords, eles, names)). Returns (coords, eles).
     """
     keep = []
     for i, p in enumerate(coords):
@@ -145,23 +146,29 @@ def _strip_backtracks(coords, eles=None, tol_m=5.0):
         if keep and _haversine_km(coords[keep[-1]], p) * 1000.0 <= 0.5:
             continue                      # drop only exact-duplicate points
         keep.append(i)
-    if len(keep) == len(coords):
-        return coords, eles               # nothing to do; keep the originals
+    if len(keep) == len(coords):          # nothing to do; keep the originals
+        return (coords, eles) if names is None else (coords, eles, names)
     new_coords = [coords[i] for i in keep]
     new_eles = ([eles[i] for i in keep]
                 if eles and len(eles) == len(coords) else eles)
-    return new_coords, new_eles
+    if names is None:
+        return new_coords, new_eles
+    new_names = ([names[i] for i in keep]
+                 if names and len(names) == len(coords) else names)
+    return new_coords, new_eles, new_names
 
 
 def _ors_directions(api_key, profile, coordinates, timeout):
     """One ORS directions call over an explicit list of through-waypoints.
 
-    Returns (coords, eles, dist_km, paved, unpaved, busy, path, path_run_km).
+    Returns (coords, eles, dist_km, paved, unpaved, busy, path, path_run_km, names).
     `coordinates` is ORS-order [[lng, lat], ...]. All route shapes are built from
     explicit geometric waypoints (see the _make_* builders), so no ORS round_trip
     is used. `busy` is the fraction of distance on arterial "State Road" class
     (US-highways); `path` is the fraction on separated bike/foot paths (multiuse
-    trails); `path_run_km` is the longest *contiguous* path stretch (km) on this leg.
+    trails); `path_run_km` is the longest *contiguous* path stretch (km) on this leg;
+    `names` is the road name for the stretch leaving each point (from ORS's turn-by-
+    turn steps), which `cues.make_cues` turns into a cue sheet.
     """
     url = ORS_URL.format(profile=profile)
     headers = {"Authorization": api_key, "Content-Type": "application/json"}
@@ -169,7 +176,7 @@ def _ors_directions(api_key, profile, coordinates, timeout):
         "coordinates": coordinates,
         "extra_info": ["surface", "waytype"],
         "elevation": True,
-        "instructions": False,
+        "instructions": True,             # only for the road names (cue sheet)
     }
 
     _count_ors_call()
@@ -193,13 +200,44 @@ def _ors_directions(api_key, profile, coordinates, timeout):
     # path_run_km uses the positional waytype values, so compute it from the raw
     # geometry BEFORE stripping stubs (which would shift the indices).
     path_run_km = _waytype_run_km(extras, coords, PATH_WAYTYPES)
+    names = _step_names(props, len(coords))
     # Drop the little A->B->A spurs ORS sometimes emits; subtract their mileage
     # from the ORS road distance so the reported length matches the cleaned line.
-    clean, eles = _strip_backtracks(coords, eles)
+    clean, eles, names = _strip_backtracks(coords, eles, names=names)
     if len(clean) != len(coords):
         dist_km = max(0.0, dist_km - (_polyline_km(coords) - _polyline_km(clean)))
         coords = clean
-    return coords, eles, dist_km, paved, unpaved, busy, path, path_run_km
+    return coords, eles, dist_km, paved, unpaved, busy, path, path_run_km, names
+
+
+def _step_names(props, n):
+    """Road name per geometry point from ORS steps (`way_points` = [from, to] indices).
+
+    names[i] names the stretch from point i to i+1; unnamed ways are "". The last
+    point repeats the name before it.
+    """
+    names = [""] * n
+    for seg in props.get("segments", []) or []:
+        for st in seg.get("steps", []) or []:
+            wp = st.get("way_points") or []
+            if len(wp) != 2:
+                continue
+            name = (st.get("name") or "").strip()
+            name = "" if name == "-" else name
+            for i in range(max(0, wp[0]), min(n, wp[1])):
+                names[i] = name
+    if n >= 2:
+        names[-1] = names[-2]
+    return names
+
+
+def _reversed_names(names):
+    """Names for a leg ridden backwards, aligned with coords[::-1]: the stretch from
+    point k back to k-1 is names[k-1]. Its first entry (the leg's far end) is the
+    name leaving the turnaround, so builders splice it whole after the outbound part."""
+    if not names:
+        return []
+    return [names[k - 1] for k in range(len(names) - 1, 0, -1)] + [names[0]]
 
 
 def _polygon_loop_waypoints(lat, lng, target_km, bearing, n_sides, orient, detour):
@@ -235,23 +273,25 @@ def _make_polygon_loop(api_key, profile, lat, lng, target_km, bearing, timeout,
     tangles, or perpendicular spurs by construction."""
     verts = _polygon_loop_waypoints(lat, lng, target_km, bearing, n_sides, orient, detour)
     pts = [[vlng, vlat] for vlat, vlng in verts]                    # -> ORS [lng, lat]
-    coords, eles, dist, paved, unpaved, busy, path, path_run = _ors_directions(
+    coords, eles, dist, paved, unpaved, busy, path, path_run, names = _ors_directions(
         api_key, profile, pts, timeout)
     return Candidate(coords=coords, distance_km=dist,
                      ascent_m=_smoothed_ascent(eles) if eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
                      path_frac=path, path_run_frac=(path_run / dist if dist else 0.0),
-                     shape="loop", eles=eles or None, waypoints=list(verts))
+                     shape="loop", eles=eles or None, waypoints=list(verts),
+                     road_names=names)
 
 
 def _make_out_back(api_key, profile, lat, lng, target_km, bearing, timeout, detour=1.3):
     """Route to a point ~target/2 away on `bearing`, then mirror the path home."""
     crow_km = (target_km / 2.0) / detour                         # roads aren't straight
     dlat, dlng = _destination(lat, lng, bearing, crow_km)
-    coords, eles, dist, paved, unpaved, busy, path, path_run = _ors_directions(
+    coords, eles, dist, paved, unpaved, busy, path, path_run, names = _ors_directions(
         api_key, profile, [[lng, lat], [dlng, dlat]], timeout)
     full_coords = coords + coords[-2::-1]                        # out + reversed (no dup turn)
     full_eles = (eles + eles[-2::-1]) if eles else []
+    full_names = names[:-1] + _reversed_names(names) if names else None
     # The leg's path stretch is ridden both ways, so an out-and-back *on* a trail
     # has run_frac ~ path_run/dist (≈1.0 if the whole leg is path) — exactly the
     # "riding the path as the destination" case this should flag.
@@ -259,7 +299,7 @@ def _make_out_back(api_key, profile, lat, lng, target_km, bearing, timeout, deto
                      ascent_m=_smoothed_ascent(full_eles) if full_eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
                      path_frac=path, path_run_frac=(path_run / dist if dist else 0.0),
-                     shape="out-and-back", eles=full_eles or None)
+                     shape="out-and-back", eles=full_eles or None, road_names=full_names)
 
 
 def _make_lollipop(api_key, profile, lat, lng, target_km, bearing, seed,
@@ -279,7 +319,7 @@ def _make_lollipop(api_key, profile, lat, lng, target_km, bearing, seed,
     crow_km = stem_oneway / detour
     dlat, dlng = _destination(lat, lng, bearing, crow_km)
 
-    s_coords, s_eles, s_dist, s_pav, s_unp, s_busy, s_path, s_run = _ors_directions(
+    s_coords, s_eles, s_dist, s_pav, s_unp, s_busy, s_path, s_run, s_names = _ors_directions(
         api_key, profile, [[lng, lat], [dlng, dlat]], timeout)
 
     # Anchor the candy at the stem's real end node, and route it as a polygon loop.
@@ -288,11 +328,13 @@ def _make_lollipop(api_key, profile, lat, lng, target_km, bearing, seed,
         glat, glng, loop_km, bearing,
         n_sides=loop_sides[seed % len(loop_sides)],
         orient=(1 if (seed // len(loop_sides)) % 2 == 0 else -1), detour=loop_detour)
-    l_coords, l_eles, l_dist, l_pav, l_unp, l_busy, l_path, l_run = _ors_directions(
+    l_coords, l_eles, l_dist, l_pav, l_unp, l_busy, l_path, l_run, l_names = _ors_directions(
         api_key, profile, [[vlng, vlat] for vlat, vlng in verts], timeout)
 
     full_coords = s_coords + l_coords[1:] + s_coords[-2::-1]     # stem + candy + stem back
     full_eles = (s_eles + l_eles[1:] + s_eles[-2::-1]) if (s_eles and l_eles) else []
+    full_names = (s_names[:-1] + l_names[:-1] + _reversed_names(s_names)
+                  if (s_names and l_names) else None)
     total_dist = s_dist * 2.0 + l_dist
 
     stem_w, loop_w = 2.0 * s_dist, l_dist                        # distance-weighted blend
@@ -306,7 +348,7 @@ def _make_lollipop(api_key, profile, lat, lng, target_km, bearing, seed,
                      ascent_m=_smoothed_ascent(full_eles) if full_eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
                      path_frac=path, path_run_frac=path_run, shape="lollipop",
-                     eles=full_eles or None)
+                     eles=full_eles or None, road_names=full_names)
 
 
 def _make_staging(api_key, profile, lat, lng, target_km, zone, seed,
@@ -342,17 +384,19 @@ def _make_staging(api_key, profile, lat, lng, target_km, zone, seed,
     stem_crow = max(0.5, crow - radius)
     tlat, tlng = _destination(lat, lng, bearing, stem_crow)      # stem target (near zone edge)
 
-    s_coords, s_eles, s_dist, s_pav, s_unp, s_busy, s_path, s_run = _ors_directions(
+    s_coords, s_eles, s_dist, s_pav, s_unp, s_busy, s_path, s_run, s_names = _ors_directions(
         api_key, profile, [[lng, lat], [tlng, tlat]], timeout)
 
     # Anchor the loop at the stem's real end node and bulge it toward the zone.
     glat, glng = s_coords[-1]
     verts = _polygon_loop_waypoints(glat, glng, loop_km, bearing, n_sides, orient, loop_detour)
-    l_coords, l_eles, l_dist, l_pav, l_unp, l_busy, l_path, l_run = _ors_directions(
+    l_coords, l_eles, l_dist, l_pav, l_unp, l_busy, l_path, l_run, l_names = _ors_directions(
         api_key, profile, [[vlng, vlat] for vlat, vlng in verts], timeout)
 
     full_coords = s_coords + l_coords[1:] + s_coords[-2::-1]     # stem + loop + stem back
     full_eles = (s_eles + l_eles[1:] + s_eles[-2::-1]) if (s_eles and l_eles) else []
+    full_names = (s_names[:-1] + l_names[:-1] + _reversed_names(s_names)
+                  if (s_names and l_names) else None)
     total_dist = s_dist * 2.0 + l_dist
 
     stem_w, loop_w = 2.0 * s_dist, l_dist                        # distance-weighted blend
@@ -366,7 +410,7 @@ def _make_staging(api_key, profile, lat, lng, target_km, zone, seed,
                      ascent_m=_smoothed_ascent(full_eles) if full_eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
                      path_frac=path, path_run_frac=path_run, shape="staging",
-                     eles=full_eles or None, score_coords=l_coords)
+                     eles=full_eles or None, score_coords=l_coords, road_names=full_names)
 
 
 def _make_rectangle(api_key, profile, lat, lng, target_km, bearing, timeout,
@@ -389,14 +433,15 @@ def _make_rectangle(api_key, profile, lat, lng, target_km, bearing, timeout,
     c_lat, c_lng = _destination(lat, lng, cross, width_crow)      # near end, offset
     pts = [[lng, lat], [a_lng, a_lat], [b_lng, b_lat], [c_lng, c_lat], [lng, lat]]
 
-    coords, eles, dist, paved, unpaved, busy, path, path_run = _ors_directions(
+    coords, eles, dist, paved, unpaved, busy, path, path_run, names = _ors_directions(
         api_key, profile, pts, timeout)
     verts = [(lat, lng), (a_lat, a_lng), (b_lat, b_lng), (c_lat, c_lng), (lat, lng)]
     return Candidate(coords=coords, distance_km=dist,
                      ascent_m=_smoothed_ascent(eles) if eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
                      path_run_frac=(path_run / dist if dist else 0.0),
-                     path_frac=path, shape="rectangle", eles=eles or None, waypoints=verts)
+                     path_frac=path, shape="rectangle", eles=eles or None, waypoints=verts,
+                     road_names=names)
 
 
 def _candidate_from_waypoints(api_key, profile, waypoints, shape, timeout):
@@ -407,13 +452,14 @@ def _candidate_from_waypoints(api_key, profile, waypoints, shape, timeout):
     route can be nudged again.
     """
     pts = [[lng, lat] for lat, lng in waypoints]                    # -> ORS [lng, lat]
-    coords, eles, dist, paved, unpaved, busy, path, path_run = _ors_directions(
+    coords, eles, dist, paved, unpaved, busy, path, path_run, names = _ors_directions(
         api_key, profile, pts, timeout)
     return Candidate(coords=coords, distance_km=dist,
                      ascent_m=_smoothed_ascent(eles) if eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy,
                      path_frac=path, path_run_frac=(path_run / dist if dist else 0.0),
-                     shape=shape, eles=eles or None, waypoints=list(waypoints))
+                     shape=shape, eles=eles or None, waypoints=list(waypoints),
+                     road_names=names)
 
 
 def refine_candidate(cand, api_key, profile, target_km, tolerance_km, score_fn,

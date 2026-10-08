@@ -180,6 +180,30 @@ def test_endpoint_checks_passphrase_and_sends_once():
         restore()
 
 
+def test_endpoint_uploads_the_tcx_twin_when_there_is_one():
+    restore = _with_env({"RWGPS_API_KEY": "K", "RWGPS_AUTH_TOKEN": "T"})
+    gpx = webapp.OUT_DIR / "feedc0de-4.gpx"
+    tcx = gpx.with_suffix(".tcx")
+    gpx.write_bytes(b"<gpx/>")
+    tcx.write_bytes(b"<tcx/>")
+    sent = []
+    saved = rwgps.send_route
+    rwgps.send_route = lambda *a, **k: sent.append((a, k)) or {"id": 3, "url": "u"}
+    webapp._rwgps_sent.clear()
+    webapp._rl_hits.clear()
+    try:
+        r = webapp.app.test_client().post(
+            "/rwgps/send", json={"gpx": gpx.name, "filename": "oct08-25mi-loop-Swind.gpx"})
+        assert r.status_code == 200
+        (args, kw), = sent
+        assert args[2] == b"<tcx/>" and kw["filename"] == "oct08-25mi-loop-Swind.tcx"
+    finally:
+        rwgps.send_route = saved
+        gpx.unlink()
+        tcx.unlink()
+        restore()
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

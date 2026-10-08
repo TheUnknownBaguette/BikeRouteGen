@@ -105,6 +105,8 @@ class Candidate:
                                 # a ride zone don't dominate the wind line). None = whole route.
     waypoints: list = None      # the routable (lat,lng) corners this route was built from
                                 # (loop/rectangle only) — the handle local-search refine nudges.
+    road_names: list = None     # road name for the stretch leaving each point, aligned with
+                                # `coords` ("" = unnamed) — the source of the cue sheet.
     wind_score: float = 0.0     # first-half headwind minus second-half headwind
                                 # (with a changing wind: minus a net-headwind penalty)
     head_out_mph: float = 0.0   # mean headwind (+) / tailwind (-) met on the first half

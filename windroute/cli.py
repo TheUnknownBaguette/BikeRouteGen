@@ -20,7 +20,7 @@ from rich.progress import Progress
 from rich.table import Table
 from rich.text import Text
 
-from . import engine, render, surface, rwgps, learn, planner, regions
+from . import engine, render, surface, rwgps, learn, planner, regions, cues
 from .planner import SURFACE_DISAGREE
 from .corrections import (CorrectionCache, parse_gpx, downsample,
                           parse_road_notes, ROAD_NOTES_TEMPLATE)
@@ -211,11 +211,15 @@ def _send_to_rwgps(creds, gpx_path, c, opt, when, unit, label, wind) -> str:
         label, f"Planned for {when:%a %b} {when.day}, {when:%H:%M}",
         f"Wind: {engine.wind_summary(c)}" if wind.known else "",
         "Made with windroute"] if x)
+    data, filename = Path(gpx_path).read_bytes(), Path(gpx_path).name
+    cue_list = cues.make_cues(c.coords, c.road_names)
+    if cue_list:                                    # upload as TCX so it has turn cues
+        data = cues.tcx_bytes(c.coords, c.eles, cue_list, name=name, start=when)
+        filename = Path(gpx_path).with_suffix(".tcx").name
     try:
         with console.status("[cyan]Sending to Ride with GPS…"):
-            route = rwgps.send_route(creds.api_key, creds.auth_token,
-                                     Path(gpx_path).read_bytes(), name, desc,
-                                     filename=Path(gpx_path).name)
+            route = rwgps.send_route(creds.api_key, creds.auth_token, data, name, desc,
+                                     filename=filename)
     except rwgps.RwgpsError as exc:
         return f"[red]Ride with GPS: {escape(str(exc))}[/]"
     return f"[green]Ride with GPS:[/] {route['url']}"
@@ -267,7 +271,7 @@ def mark(
             with console.status("[cyan]Routing the road for your correction…"):
                 lat1, lng1, lbl1 = engine.geocode(between)
                 lat2, lng2, lbl2 = engine.geocode(to)
-                road, _e, _d, _p, _u, _b, _pa, _pr = engine._ors_directions(
+                road, _e, _d, _p, _u, _b, _pa, _pr, _n = engine._ors_directions(
                     api_key, profile, [[lng1, lat1], [lng2, lat2]], timeout=40)
             coords = downsample(road)
             origin = f"{lbl1} -> {lbl2}"

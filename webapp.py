@@ -27,7 +27,7 @@ from urllib.parse import urlencode
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
-from windroute import engine, render, planner, rwgps
+from windroute import engine, render, planner, rwgps, cues
 
 app = Flask(__name__)
 # Cache-buster for our own CSS/JS: changes on every (re)start, i.e. every deploy, so
@@ -285,6 +285,12 @@ def plan():
         dist_num = f"{c.distance_km * per_unit:.1f}"
         title = f"{dist_num} {unit} {ride_type} {c.shape} - {headline}"
         render.write_gpx(c.coords, str(base.with_suffix(".gpx")), name=title)
+        # A TCX twin with turn cues: what "Send to Ride with GPS" uploads.
+        cue_list = cues.make_cues(c.coords, c.road_names)
+        if cue_list:
+            base.with_suffix(".tcx").write_bytes(cues.tcx_bytes(
+                c.coords, c.eles, cue_list, name=title, start=result.when,
+                speed_kmh=pace if unit == "km" else pace * 1.609344))
         ride_time = engine.scoring._hhmm(c.ride_hours) if c.ride_hours else ""
         wind_line = engine.wind_summary(c) if wind.known else "no wind forecast"
         routes.append({
@@ -462,11 +468,15 @@ def rwgps_send():
     path = OUT_DIR / gpx
     if not path.is_file():
         return jsonify(error="This route has expired. Plan it again to send it."), 410
+    filename = str(body.get("filename", gpx))[:80]
+    if path.with_suffix(".tcx").is_file():           # same route, plus turn cues
+        path = path.with_suffix(".tcx")
+        filename = filename.rsplit(".", 1)[0] + ".tcx"
     name = str(body.get("name", "")).strip()[:120] or "windroute route"
     desc = str(body.get("description", "")).strip()[:2000]
     try:
         route = rwgps.send_route(api_key, auth_token, path.read_bytes(), name, desc,
-                                 filename=str(body.get("filename", gpx))[:80])
+                                 filename=filename)
     except rwgps.RwgpsError as exc:
         app.logger.warning("rwgps send failed: %s", exc)
         msg = str(exc)

@@ -177,7 +177,8 @@ TASK_FAILED = {"failed", "error", "errored", "cancelled", "canceled"}
 def upload_route(api_key: str, auth_token: str, gpx_bytes: bytes, name: str,
                  description: str = "", filename: str = "route.gpx",
                  timeout: int = DEFAULT_TIMEOUT) -> dict:
-    """Start a route import from a GPX file. Returns the task dict.
+    """Start a route import from a GPX or TCX file (by `filename`'s extension; TCX
+    carries turn cues). Returns the task dict.
 
     `POST /routes.json` is multipart only and asynchronous: it answers 202 with a
     pending task; `wait_for_task` turns that into the new route. Visibility can't
@@ -186,7 +187,10 @@ def upload_route(api_key: str, auth_token: str, gpx_bytes: bytes, name: str,
     """
     url = f"{RWGPS_BASE}/routes.json"
     r = requests.post(url, headers=_headers(api_key, auth_token),
-                      files={"file": (filename, gpx_bytes, "application/gpx+xml")},
+                      files={"file": (filename, gpx_bytes,
+                                       "application/vnd.garmin.tcx+xml"
+                                       if filename.lower().endswith(".tcx")
+                                       else "application/gpx+xml")},
                       data={"name": name[:128], "description": description},
                       timeout=timeout)
     data = _json_or_raise(r, url)

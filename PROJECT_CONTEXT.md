@@ -375,11 +375,26 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
     the button on (without them it's hidden and `/rwgps/send` 404s). The local
     `~/.windroute/rwgps.json` from June 2026 is probably the owner's *personal* account, so
     the projects account needs its own key + token (owner runs `rwgps-login` for it).
+  - **Setup gotchas (hit on 2026-10-08):** in Render they must be **Environment
+    Variables**, not Secret Files (those become files under `/etc/secrets/`, which the app
+    doesn't read). The auth token is NOT the "API secret" shown next to the key (that's for
+    OAuth): create it on the API client's page in Ride with GPS while signed in as the
+    projects account. That account signs in with Google, so it has no RWGPS password and
+    `rwgps-login --email` can't mint a token for it. A wrong token gives
+    `HTTP 401 {"errors":["Failed to authenticate the request"]}` on the upload.
   - **Passphrase is optional** (`RWGPS_SEND_PASSPHRASE`). The owner chose to leave it unset:
     it's a throwaway account and they're nearly the only user, so flooding isn't a worry.
     The per-IP rate limit still applies. If junk routes ever show up, set the secret: the
     button then asks once and keeps it in localStorage (`wr.rwgps.pass`, dropped on a 403).
   - The server remembers GPX -> route URL, so a second click doesn't make a duplicate.
+  - **Turn cues:** a GPX track has none, so uploads are TCX with CoursePoint cues.
+    `_ors_directions` asks ORS for steps (`instructions: True`) only to get a road name
+    per point (`_step_names`); `Candidate.road_names` is kept aligned with `coords`
+    through backtrack stripping and stem reversal (`_reversed_names`, aligned with
+    `coords[::-1]`). `cues.make_cues` then puts a cue wherever the road changes (plus
+    turnarounds), with left/right from the bend on the FINAL line, so reversed stems get
+    mirrored turns. `/plan` writes `<token>-<i>.tcx` beside each GPX; `/rwgps/send`
+    uploads that twin when present. The Download button is still plain GPX.
 - **Corrections cache** (`mark` / `corrections` / `forget`): record personal ground
   truth (a road is really gravel / really busy) via GPX, points, or `--between`/`--to`;
   applied on top of surface data on every plan.
