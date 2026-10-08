@@ -185,6 +185,8 @@ def _ors_directions(api_key, profile, coordinates, timeout):
         "extra_info": ["surface", "waytype", "suitability"],
         "elevation": True,
         "instructions": True,             # only for the road names (cue sheet)
+        # can't (or shouldn't) ride these; accepted by all cycling profiles
+        "options": {"avoid_features": ["ferries", "steps", "fords"]},
     }
 
     _count_ors_call()
@@ -217,6 +219,101 @@ def _ors_directions(api_key, profile, coordinates, timeout):
         dist_km = max(0.0, dist_km - (_polyline_km(coords) - _polyline_km(clean)))
         coords = clean
     return coords, eles, dist_km, paved, unpaved, busy, path, path_run_km, names, poor
+
+
+SPUR_TOL_M = 50.0      # in and back out: the two sides stay within this (a divided
+                       # road's carriageways are ~40 m apart, e.g. Roosevelt Rd)
+SPUR_MIN_M = 60.0      # shorter retraces are jitter at a junction. Must stay > TOL/2:
+                       # on a plain straight road any "matching" span is <= TOL long
+SPUR_STEP_M = 15.0     # how finely the two sides are compared
+
+
+def _trim_spurs(coords, eles=None, names=None, tol_m=SPUR_TOL_M, min_m=SPUR_MIN_M,
+                step_m=SPUR_STEP_M):
+    """Cut "ride in and straight back out" spurs from an assembled route.
+
+    A spur is a point i where the route folds back on itself: the points d metres
+    before and d metres after i (along the route) stay within `tol_m` of each other
+    for d = step, 2*step, ... up to the spur's length. Pairing by distance, not by
+    point index, matters: the two sides of a divided road are drawn with different
+    numbers of points. Spurs show up where `_strip_backtracks` (exact retrace, one
+    ORS leg) can't see them: a lollipop's candy leaving back along the road the stem
+    came in on (two legs joined), a dead end with a turning circle, and a U-turn on
+    a divided road. A spur reaching the route's start or end is left alone.
+
+    The spur is spliced out: the route goes straight from the last point before it
+    to the first point after it (both on the road it came in on). Never run this on an out-and-back: its whole return is one deliberate
+    retrace. Returns (coords, eles, names, removed_km), eles/names kept in lockstep
+    when aligned.
+    """
+    import bisect
+
+    n = len(coords)
+    keep_e = bool(eles) and len(eles) == n
+    keep_n = bool(names) and len(names) == n
+    coords, removed = list(coords), 0.0
+    eles = list(eles) if keep_e else eles
+    names = list(names) if keep_n else names
+
+    step_km, min_km = step_m / 1000.0, min_m / 1000.0
+
+    def at(cum, km):
+        """(lat, lng) exactly `km` along the route (interpolated)."""
+        j = min(max(bisect.bisect_right(cum, km) - 1, 0), len(cum) - 2)
+        seg = cum[j + 1] - cum[j]
+        t = 0.0 if seg <= 0 else min(1.0, max(0.0, (km - cum[j]) / seg))
+        (y0, x0), (y1, x1) = coords[j], coords[j + 1]
+        return (y0 + (y1 - y0) * t, x0 + (x1 - x0) * t)
+
+    def find(cum):                                        # cum is in km
+        total = cum[-1]
+        for i in range(1, len(coords) - 1):
+            d, best = step_km, 0.0
+            while cum[i] - d > 0 and cum[i] + d < total:  # a spur can't reach start/end
+                if _haversine_km(at(cum, cum[i] - d), at(cum, cum[i] + d)) * 1000.0 > tol_m:
+                    break
+                best, d = d, d + step_km
+            if best >= min_km:
+                lo = bisect.bisect_right(cum, cum[i] - best) - 1  # spur's outer reach,
+                hi = bisect.bisect_left(cum, cum[i] + best)       # one vertex each side
+                # Leave and rejoin at the closest pair of points across the two sides (a
+                # junction, or straight over a median), outermost on ties, so the splice
+                # never cuts a corner.
+                return min(((x, y) for x in range(lo, i) for y in range(i + 1, hi + 1)),
+                           key=lambda xy: (round(_haversine_km(coords[xy[0]],
+                                                               coords[xy[1]]) * 1000.0),
+                                           xy[0], -xy[1]))
+        return None
+
+    while len(coords) > 2:
+        cum = [0.0]
+        for p, q in zip(coords, coords[1:]):
+            cum.append(cum[-1] + _haversine_km(p, q))
+        hit = find(cum)
+        if hit is None:
+            break
+        a, b = hit                                       # keep coords[..a] + coords[b..]
+        removed += (cum[b] - cum[a]) - _haversine_km(coords[a], coords[b])
+        if keep_n:
+            names[a] = names[b]                          # leave a on the road b leaves by
+            names[a + 1:b] = []
+        coords[a + 1:b] = []
+        if keep_e:
+            eles[a + 1:b] = []
+    return coords, eles, names, removed
+
+
+def _without_spurs(c):
+    """`_trim_spurs` applied to a built Candidate, fixing distance and climb."""
+    coords, eles, names, removed = _trim_spurs(c.coords, c.eles, c.road_names)
+    if removed <= 0:
+        return c
+    c.coords, c.road_names = coords, names
+    c.distance_km = max(0.0, c.distance_km - removed)
+    if eles:
+        c.eles = eles
+        c.ascent_m = _smoothed_ascent(eles)
+    return c
 
 
 def _step_names(props, n):
@@ -284,12 +381,13 @@ def _make_polygon_loop(api_key, profile, lat, lng, target_km, bearing, timeout,
     pts = [[vlng, vlat] for vlat, vlng in verts]                    # -> ORS [lng, lat]
     coords, eles, dist, paved, unpaved, busy, path, path_run, names, poor = _ors_directions(
         api_key, profile, pts, timeout)
-    return Candidate(coords=coords, distance_km=dist,
+    return _without_spurs(Candidate(
+                     coords=coords, distance_km=dist,
                      ascent_m=_smoothed_ascent(eles) if eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy, poor_road_frac=poor,
                      path_frac=path, path_run_frac=(path_run / dist if dist else 0.0),
                      shape="loop", eles=eles or None, waypoints=list(verts),
-                     road_names=names)
+                     road_names=names))
 
 
 def _make_out_back(api_key, profile, lat, lng, target_km, bearing, timeout, detour=1.3):
@@ -354,11 +452,11 @@ def _make_lollipop(api_key, profile, lat, lng, target_km, bearing, seed,
     poor = (s_poor * stem_w + l_poor * loop_w) / tot if tot else 0.0
     path = (s_path * stem_w + l_path * loop_w) / tot if tot else 0.0
     path_run = max(s_run, l_run) / total_dist if total_dist else 0.0   # longest single run
-    return Candidate(coords=full_coords, distance_km=total_dist,
+    return _without_spurs(Candidate(coords=full_coords, distance_km=total_dist,
                      ascent_m=_smoothed_ascent(full_eles) if full_eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy, poor_road_frac=poor,
                      path_frac=path, path_run_frac=path_run, shape="lollipop",
-                     eles=full_eles or None, road_names=full_names)
+                     eles=full_eles or None, road_names=full_names))
 
 
 def _make_staging(api_key, profile, lat, lng, target_km, zone, seed,
@@ -417,11 +515,11 @@ def _make_staging(api_key, profile, lat, lng, target_km, zone, seed,
     poor = (s_poor * stem_w + l_poor * loop_w) / tot if tot else 0.0
     path = (s_path * stem_w + l_path * loop_w) / tot if tot else 0.0
     path_run = max(s_run, l_run) / total_dist if total_dist else 0.0   # longest single run
-    return Candidate(coords=full_coords, distance_km=total_dist,
+    return _without_spurs(Candidate(coords=full_coords, distance_km=total_dist,
                      ascent_m=_smoothed_ascent(full_eles) if full_eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy, poor_road_frac=poor,
                      path_frac=path, path_run_frac=path_run, shape="staging",
-                     eles=full_eles or None, score_coords=l_coords, road_names=full_names)
+                     eles=full_eles or None, score_coords=l_coords, road_names=full_names))
 
 
 def _make_rectangle(api_key, profile, lat, lng, target_km, bearing, timeout,
@@ -447,12 +545,12 @@ def _make_rectangle(api_key, profile, lat, lng, target_km, bearing, timeout,
     coords, eles, dist, paved, unpaved, busy, path, path_run, names, poor = _ors_directions(
         api_key, profile, pts, timeout)
     verts = [(lat, lng), (a_lat, a_lng), (b_lat, b_lng), (c_lat, c_lng), (lat, lng)]
-    return Candidate(coords=coords, distance_km=dist,
+    return _without_spurs(Candidate(coords=coords, distance_km=dist,
                      ascent_m=_smoothed_ascent(eles) if eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy, poor_road_frac=poor,
                      path_run_frac=(path_run / dist if dist else 0.0),
                      path_frac=path, shape="rectangle", eles=eles or None, waypoints=verts,
-                     road_names=names)
+                     road_names=names))
 
 
 def _candidate_from_waypoints(api_key, profile, waypoints, shape, timeout):
@@ -465,12 +563,12 @@ def _candidate_from_waypoints(api_key, profile, waypoints, shape, timeout):
     pts = [[lng, lat] for lat, lng in waypoints]                    # -> ORS [lng, lat]
     coords, eles, dist, paved, unpaved, busy, path, path_run, names, poor = _ors_directions(
         api_key, profile, pts, timeout)
-    return Candidate(coords=coords, distance_km=dist,
+    return _without_spurs(Candidate(coords=coords, distance_km=dist,
                      ascent_m=_smoothed_ascent(eles) if eles else 0.0,
                      paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy, poor_road_frac=poor,
                      path_frac=path, path_run_frac=(path_run / dist if dist else 0.0),
                      shape=shape, eles=eles or None, waypoints=list(waypoints),
-                     road_names=names)
+                     road_names=names))
 
 
 def refine_candidate(cand, api_key, profile, target_km, tolerance_km, score_fn,

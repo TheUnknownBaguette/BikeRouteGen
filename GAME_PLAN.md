@@ -143,7 +143,11 @@ Ride with GPS for sharing routes).
 
 ---
 
-## 3. Personal heatmap from ride history
+## 3. Personal heatmap from ride history: SHELVED (2026-10-08)
+
+> **Owner decision:** not now. The goal is a planner that works well *anywhere*, not just
+> where the owner rides, so signals trained on one person's history are out. Prefer
+> signals with broad coverage (ORS, OSM) over region- or person-specific ones.
 
 **Goal:** prefer roads the owner has actually ridden: a personal, legitimate stand-in for a
 Strava heatmap. These roads are both "where a good rider goes" and proven rideable.
@@ -257,3 +261,6 @@ database), and handling token refresh. Revisit when there's demand.
 | 2026-10-08 | 2 | **Cues added** (owner picked: build them from ORS road names). ORS calls now ask for steps; `Candidate.road_names` is carried through stitching/reversal; `windroute/cues.py` makes cues on the final line + writes a TCX (CoursePoints); the send button uploads the `.tcx` twin. Needs one hosted test upload to confirm Ride with GPS shows the cue sheet |
 | 2026-10-08 | 2 | Cue sheet confirmed on the hosted site. **Item 2 done.** |
 | 2026-10-08 | 1 | **Built.** `suitability` extra on every ORS call; `Candidate.poor_road_frac` = share rated <=5 that isn't a State Road (calibration: arterials are 5, streets 8, paths 9, rural county roads 7 = fine); `W_POOR=1.0` beyond a 2% free band; cards/table "busy road" % = busy + poor. Before/after: top picks unchanged in Mokena/Oak Park/Naperville, one arterial-heavy route dropped 2 places. Also: a dropped ORS connection no longer kills the plan, and a 429 now says "wait a minute" |
+| 2026-10-08 | 5 | **Built** (no owner example needed: measured real plans instead). Found 1-3 spurs per lollipop and some loops/rectangles: in-and-back pokes at the stem/candy join, dead ends with turning circles, U-turns on divided roads (Roosevelt, Mannheim, Pershing), up to ~1.3 km each route. `routing._trim_spurs` (distance-paired, 50 m sides, >= 60 m long) cuts them on every shape but out-and-back. ORS now avoids ferries/steps/fords. ORS doesn't return access restrictions for bikes, but its bike profiles already skip private/no-access roads. Cue fixes: hairpins onto another road are "sharp left/right", not "turn around"; no cues in the first/last 30 m |
+| 2026-10-08 | 5 | Owner's bad/good GPX pair (Urbana, north of the Boneyard): the bad route takes unnamed `highway=service` ways off N Fourth St north of Bradley (OSM #1317157631-34, #1346949062), then N Oak St north of W Anthony Dr (#5338926) and Somer Dr (#5330479, #882135052, #882135051) to Lincoln Ave. OSM tags them as ordinary roads (TIGER import, `tiger:reviewed=no`), ORS suitability rates N Oak 8/10, and `cycling-regular` (our road profile) picks this exact line (`cycling-road` doesn't). No general tag separates them from good unreviewed rural roads, so the fix chosen is **owner edits OSM**. Not built: an avoid-list via ORS `avoid_polygons`, or a penalty on long unnamed service-road runs |
+| 2026-10-08 | 3 | **Shelved** by owner: wants the planner to work in as many places as possible, not tuned to their own riding |

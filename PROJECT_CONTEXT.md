@@ -356,6 +356,16 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   Scored as `W_POOR=1.0` x share beyond `POOR_FREE_FRAC=0.02`; a gentle nudge (top picks
   unchanged in before/after runs). Cards/table "busy road" % shows busy + poor. A
   "quiet" road correction clears it like it clears busy.
+- **Spur trimming** (Oct 2026, GAME_PLAN item 5): `routing._trim_spurs` cuts "ride in and
+  straight back out" stretches from every built route except out-and-back (whose return
+  is one deliberate retrace). It pairs points at EQUAL DISTANCE before/after a fold (not
+  by index: a divided road's two carriageways have different point counts) and calls
+  it a spur while the pairs stay within `SPUR_TOL_M` (50 m, carriageways are ~40 m apart)
+  for at least `SPUR_MIN_M` (60 m). It rejoins at the closest pair of points across the
+  two sides, so it never cuts a corner. `_strip_backtracks` still runs first per ORS leg
+  (exact retraces only). Causes it catches: the lollipop stem/candy join, dead ends with
+  turning circles, U-turns on divided roads. ORS calls also send
+  `options.avoid_features = [ferries, steps, fords]`.
 - **Bike paths** (separated multiuse trails, ORS waytype 4/6/7): penalty is on the
   **longest *contiguous* path run** (`path_run_frac`) beyond `PATH_RUN_FREE_FRAC` (0.25),
   NOT total path mileage — the owner uses trails as connectors to reach good riding, not

@@ -47,6 +47,16 @@ def test_reversed_leg_turns_the_other_way_at_the_same_corner():
     assert full[back["i"]] == coords[10]                     # exactly the corner
 
 
+def test_hairpin_onto_another_road_is_a_sharp_turn_not_a_turnaround():
+    """North on Main, then a ~155-degree hairpin onto Elm heading away south-east."""
+    north = _street(41.50, -87.85, 0.0009, 0.0, 11)
+    elm = [(north[-1][0] - 0.00085 * k, north[-1][1] + 0.0006 * k) for k in range(1, 11)]
+    coords = north + elm
+    names = ["Main"] * 10 + ["Elm"] * (len(coords) - 10)
+    cl = cues.make_cues(coords, names)
+    assert len(cl) == 1 and cl[0]["text"] == "Turn sharp right onto Elm"
+
+
 def test_name_blip_is_ignored():
     coords = _street(41.50, -87.85, 0.00018, 0.0, 51)        # 1 km north, ~20 m steps
     names = ["Main St"] * 51

@@ -21,6 +21,11 @@ LOOK_M = 40.0          # bend measured from ~this far before the turn to ~this f
 MIN_GAP_M = 60.0       # cues closer than this to the previous one are dropped
 BLIP_M = 40.0          # a name that lasts less than this (and returns) is noise
 TURNAROUND_DEG = 150.0 # a bend this sharp gets a cue even without a road change
+REVERSAL_M = 200.0     # ... and is a real turnaround only if the route comes back:
+REVERSAL_GAP_M = 60.0  # points this far either side end up this close together
+END_M = 100.0          # no turnaround cues this close to the start / finish (a start
+                       # point mid-block makes a meaningless one)
+EDGE_M = 30.0          # and no cues at all this close: the route is just getting going
 
 
 def _point_back(coords, cum, i, metres):
@@ -38,14 +43,17 @@ def _point_ahead(coords, cum, i, metres):
     return j
 
 
-def _turn(delta):
-    """(direction word, TCX PointType) for a heading change in degrees (+ = right)."""
+def _turn(delta, reverses=True):
+    """(direction word, TCX PointType) for a heading change in degrees (+ = right).
+    A very sharp bend is a u-turn only when the route `reverses`, else a sharp turn."""
     a = abs(delta)
     side = "right" if delta > 0 else "left"
     if a < 25:
         return "continue", "Straight"
     if a >= TURNAROUND_DEG:
-        return "u-turn", "Generic"
+        if reverses:
+            return "u-turn", "Generic"
+        return "sharp " + side, side.capitalize()
     kind = "slight " if a < 50 else "sharp " if a > 130 else ""
     return kind + side, side.capitalize()
 
@@ -82,9 +90,19 @@ def make_cues(coords, names):
             if (cum[j] - cum[i]) * 1000.0 < BLIP_M and names[j] == road:
                 continue
             road = new
+        if min(cum[i], cum[-1] - cum[i]) * 1000.0 < EDGE_M:
+            continue
         if last_km >= 0 and (cum[i] - last_km) * 1000.0 < MIN_GAP_M:
             continue
-        word, ptype = _turn(delta)
+        reverses = True
+        if abs(delta) >= TURNAROUND_DEG:
+            back = coords[_point_back(coords, cum, i, REVERSAL_M)]
+            ahead = coords[_point_ahead(coords, cum, i, REVERSAL_M)]
+            reverses = _haversine_km(back, ahead) * 1000.0 <= REVERSAL_GAP_M
+            near_end = min(cum[i], cum[-1] - cum[i]) * 1000.0 < END_M
+            if reverses and near_end:
+                continue
+        word, ptype = _turn(delta, reverses)
         if word == "u-turn":
             text = "Turn around" + (f" on {new}" if new else "")
         elif word == "continue":
