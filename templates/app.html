@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% from "_macros.html" import brand, credits with context %}
 {# Map-first app shell shared by the plan form and the results: a side panel
-   (bottom sheet on phones) next to a full-height map. #}
+   (bottom sheet on phones) next to a full-height map. The panel body is the
+   scroller, with the header and action bar floating over it as translucent bars
+   so content scrolls underneath them. #}
 {% block bodyclass %}app{% endblock %}
 {% block head %}
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet.css') }}">
@@ -9,15 +11,18 @@
 {% block body %}
   <div class="shell">
     <aside class="panel" aria-label="{% block panel_label %}Plan{% endblock %}">
-      <header class="panel-head">
-        {{ brand() }}
-        <div class="actions">{% block head_actions %}{% endblock %}</div>
-      </header>
       <div class="panel-body" id="panel-body">
-        {% block panel %}{% endblock %}
+        <span class="grip" aria-hidden="true"></span>
+        <header class="panel-head">
+          {{ brand() }}
+          <div class="actions">{% block head_actions %}{% endblock %}</div>
+        </header>
+        <div class="panel-content">
+          {% block panel %}{% endblock %}
+        </div>
+        {% block panel_action %}{% endblock %}
+        <footer class="panel-foot">{{ credits() }}</footer>
       </div>
-      {% block panel_action %}{% endblock %}
-      <footer class="panel-foot">{{ credits() }}</footer>
     </aside>
     <section class="stage" aria-label="Map">
       <div id="map" class="stage-map"></div>
@@ -25,5 +30,6 @@
     </section>
   </div>
   <script src="{{ url_for('static', filename='vendor/leaflet.js') }}"></script>
+  <script src="{{ url_for('static', filename='shell.js', v=asset_v) }}"></script>
   {% block scripts %}{% endblock %}
 {% endblock %}

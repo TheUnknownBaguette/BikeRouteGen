@@ -153,7 +153,8 @@ templates/        base (head + reading layout for about) / _macros (brand, credi
 static/           style.css (all styles, light + dark) / app.js (form, address search,
                   recent starts) / map.js (basemaps, routes, selection, elevation, wind arrows)
                   / wind.js (wind field + ride model ported from Python) / share.js (share-link
-                  encode/decode + shared page) / vendor/ (Leaflet 1.9.4) / out/ (generated
+                  encode/decode + shared page) / shell.js (panel scroll-edge state, iOS
+                  :active fix) / vendor/ (Leaflet 1.9.4) / out/ (generated
                   GPX, gitignored, swept hourly)
 run.bat           double-click launcher; self-builds/repairs the venv (see gotchas)
 Procfile          prod start command for a host (waitress-serve webapp:app)
@@ -503,6 +504,11 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   OneDrive-synced copies can't run). Web-only users need only Python + an ORS key.
 - **Map-first web UI (Oct 2026):** `templates/app.html` is a full-height shell (side panel /
   phone bottom sheet + Leaflet map); `static/style.css` holds all styles (light + dark tokens).
+  Apple-style refresh: system font (no Google Fonts; CSP dropped those hosts), translucent
+  header/action bars the panel content scrolls under, press-down feedback, a sliding
+  segmented-control thumb, spring easing as a CSS `linear()` curve (`--spring`), and
+  fallbacks for reduced motion / transparency / more contrast. Newer touches (details and
+  card expansion, toast/overlay entry) are progressive: older browsers just snap.
   Results put every ranked candidate on the map with a card + GPX; select via card, line,
   table, ↑/↓ or the phone carousel. The page payload (`#route-data` JSON) carries routes,
   card fields, the plan header and the wind field. Extras:

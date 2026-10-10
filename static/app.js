@@ -22,7 +22,13 @@
     if (go) { go.disabled = true; go.lastChild.textContent = ' Planning…'; }
     if (overlay) overlay.hidden = false;
     var i = 0;
-    if (step) setInterval(function () { i = Math.min(i + 1, STEPS.length - 1); step.textContent = STEPS[i]; }, 5500);
+    // each step cross-fades into the next rather than snapping
+    if (step) setInterval(function () {
+      if (i === STEPS.length - 1) return;
+      i++;
+      step.classList.add('swap');
+      setTimeout(function () { step.textContent = STEPS[i]; step.classList.remove('swap'); }, 200);
+    }, 5500);
   });
   // coming back via the browser's back button: un-stick the busy state
   window.addEventListener('pageshow', function (e) {

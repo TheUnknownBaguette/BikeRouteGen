@@ -105,8 +105,7 @@ def _security_headers(resp):
         "default-src 'self'; "
         "img-src 'self' data: https://tile.openstreetmap.org "
         "https://*.tile-cyclosm.openstreetmap.fr https://*.tile.opentopomap.org; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        "font-src 'self' https://fonts.gstatic.com; "
+        "style-src 'self' 'unsafe-inline'; "
         "script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
     )
     # Only assert HSTS when actually reached over HTTPS (Render terminates TLS and
