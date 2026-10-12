@@ -6,7 +6,9 @@ the non-obvious decisions behind it. Keep it updated when you finish a feature.
 
 **Current work:** `GAME_PLAN.md` (Oct 2026) — the agreed next steps (Ride with GPS upload,
 personal heatmap, traffic counts, bike-suitability, routability), with API facts, ground
-rules and the owner's open questions. Start there when picking up new work.
+rules and the owner's open questions. Start there when picking up new work. The
+"work-plan Task N" / "CODE_HEALTH Task X" references below point at the finished plans
+in `docs/archive/` (`ROUTE_ALGO_WORKPLAN.md`, `CODE_HEALTH_WORKPLAN.md`).
 
 ---
 
@@ -108,8 +110,13 @@ driven HOST/PORT + waitress are the provisions for it. Watch the ORS free-tier l
 
 **Public-instance hardening (all default-on, no config):** security headers (CSP
 `default-src 'self'`, X-Frame-Options, Referrer-Policy, HSTS over HTTPS), server-side
-input clamps (candidates 1-20, distance/tolerance bounds), a per-IP in-memory rate limit
-on `/plan` (12 / 5 min — each plan is ~12-15 ORS calls), a 32 KB body cap, friendly error
+input clamps (candidates 1-20, distance/tolerance bounds; rides capped at
+`routing.MAX_RIDE_KM` = 250 km, checked before any lookup), a per-IP in-memory rate limit
+on `/plan` (30 / 5 min, env `RATE_LIMIT_PLANS` — each plan is ~12-15 ORS calls) plus a
+**site-wide cap of 1,800 ORS calls per rolling 24 h** (env `SITE_ORS_PER_DAY`). The
+site-wide cap exists because the per-IP key is `X-Forwarded-For`, which Render passes
+through from the client, so it can be faked; the site cap can't. Both are per process
+and reset on restart. Also a 32 KB body cap, friendly error
 messages (raw exceptions logged not shown), and a visible **`/about`** page (privacy
 policy + ride-safety / "vibecoded, no warranty" disclaimer) linked from a heads-up banner
 and footer.
@@ -310,6 +317,10 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
 - **Distance tolerance:** `-t/--tolerance` free buffer band; only excess is penalized.
 - **Elevation fix:** `engine._smoothed_ascent` (interpolate SRTM nodata, median +
   moving-average filter, hysteresis) — raw ORS ascent was wildly inflated on flat IL.
+  Nodata = exactly 0.0 (ORS's dropout) or below `NODATA_BELOW_M` (-500, SRTM voids); real
+  ground below sea level counts (it used to be thrown away as nodata, Oct 2026).
+- **Ride cap:** 250 km (`routing.MAX_RIDE_KM`). The old 100 km cap was ORS's limit for its
+  `round_trip` option, which no shape uses any more. The wind field covers -1..+16 h.
 - **Route shapes** (`--shapes`, default `loop,lollipop,rectangle`): loop, lollipop,
   **rectangle** (long leg into wind / short crosswind jog / long parallel leg home —
   owner loves these in grid country), out-and-back (opt-in). Directional shapes aim

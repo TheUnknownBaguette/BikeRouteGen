@@ -5,7 +5,7 @@ written so any later session can pick them up cold. Go through it together, one 
 time: confirm the open questions with the owner, build, test, then mark the item done here.
 
 **Read first:** `PROJECT_CONTEXT.md` (what exists, gotchas). The older
-`ROUTE_ALGO_WORKPLAN.md` / `CODE_HEALTH_WORKPLAN.md` are finished and only historical.
+`docs/archive/ROUTE_ALGO_WORKPLAN.md` / `docs/archive/CODE_HEALTH_WORKPLAN.md` are finished and only historical.
 
 ---
 
@@ -33,7 +33,7 @@ time: confirm the open questions with the owner, build, test, then mark the item
 
 - Project: `C:\Users\gcook\OneDrive\Gus' School Folder\Code\claude\BikeRouteGen`; the venv is
   `.venv` (rebuilt on this PC in Oct 2026). `run.bat` rebuilds it on other machines.
-- Tests: `.venv/Scripts/python.exe -m pytest -q` (161 passing as of 2026-10-12, all offline).
+- Tests: `.venv/Scripts/python.exe -m pytest -q` (172 passing as of 2026-10-12, all offline).
 - Local preview from Claude Code: the `webapp-c` entry in the parent folder's
   `.claude/launch.json` (waitress on port 5057). Restart it after Python/template changes.
 - `ORS_API_KEY` is set in the Windows user environment. ORS now lives at
@@ -59,6 +59,19 @@ time: confirm the open questions with the owner, build, test, then mark the item
 Smaller leftovers already listed in PROJECT_CONTEXT "Possible next steps" (do any time):
 default the start box to the most recent start; fit `WIND_SPEED_EFFECT` (0.25) to ride
 history; wind-exposure weighting (shelter vs. open); suburban-escape by default.
+
+**Code-health ideas saved for later** (from the Oct 12 review; owner said "later"). None
+change behavior:
+- `routing._ors_directions` returns a bare 10-value tuple; a NamedTuple would make the
+  call sites (builders, `cli mark`, `roads-import`) readable.
+- `_make_lollipop` and `_make_staging` repeat the same distance-weighted blending; share
+  one helper.
+- `OverpassSurface` has four near-identical `_nearest_*` lookups; fold into one.
+- 10 older test files still carry `_run()` runners and `sys.path` inserts pytest doesn't
+  need (the newer files don't).
+- CI tests only Python 3.11 and Render's Python isn't pinned: add a `.python-version` and
+  test that version too.
+- `discord_bot.py` is untested and unused: keep as an example or drop it.
 
 ---
 
@@ -275,3 +288,4 @@ database), and handling token refresh. Revisit when there's demand.
 | 2026-10-12 | reliable road lookup | **Built.** Root cause of today's 'speed limits still loading': Overpass refused the query for declaring the default 512 MB; declaring 32 MB got it in within ~2 s. Also: partial answers no longer cached as empty, failed mirrors go last, hedged second mirror after 6 s, in-flight joining, and the plan form prefetches the lookup. Champaign plan: 5.6 s with full road data |
 | 2026-10-12 | code-health pass | **Done (behavior-neutral; scores byte-identical vs before).** Removed dead code (`scoring.explain`, `Candidate.surface_score`, `generate_candidates(sleep=)`, unused imports/constants, duplicate `_haversine_km`). Safety: web form choice fields whitelisted, GPX names XML-escaped, share links can't inject HTML (tooltip/color), failed region lookups no longer cached forever, thread-safe suggest cache, CLI password prompted hidden. One User-Agent with a contact link for every outside service. Privacy page now covers Photon, map tiles, browser storage and public Ride with GPS uploads. Dependency floors raised to patched releases; CI actions bumped. `tests/test_hardening.py`. **Open for the owner:** rate limit trusts a spoofable `X-Forwarded-For` on Render; the 100 km cap is a leftover of ORS round trips (directions allow far more); archive the two finished workplans; `_smoothed_ascent` treats elevation <= 0 m as missing data |
 | 2026-10-12 | crossing counter | **Fixed.** Shared points / shared stretches only count as a crossing when the second pass goes from one side of the first to the other. Oct 11 ridden route: 11 -> 1 (it lost 0.04 to this). Owner: keep wind scoring and wind-led labels on calm days (a small tailwind still matters) |
+| 2026-10-12 | owner decisions from the review | **Done.** (1) Per-IP limit raised to 30 plans / 5 min (env `RATE_LIMIT_PLANS`) plus a site-wide cap of 1,800 ORS calls per rolling 24 h (env `SITE_ORS_PER_DAY`), which a faked `X-Forwarded-For` can't get around; past it the form says to try later instead of failing. (2) Ride cap 100 -> 250 km (`routing.MAX_RIDE_KM`), checked before any lookup; wind window +16 h. (3) Finished workplans moved to `docs/archive/`. (4) Climb counts ground below sea level (nodata is now exactly 0.0 or < -500 m). Tests: `tests/test_limits_and_climb.py`; 172 passing |

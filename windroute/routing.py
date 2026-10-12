@@ -659,6 +659,12 @@ def refine_candidate(cand, api_key, profile, target_km, tolerance_km, score_fn,
 
 ORS_MAX_WORKERS = 6   # candidate ORS calls in flight at once (free tier ~40 req/min)
 
+# Longest ride we plan. ORS's own 100 km limit only applies to its round_trip
+# option, which the shapes no longer use (directions through waypoints allow far
+# more); this cap keeps the per-plan OSM lookups (they cover ~0.4 x the distance
+# around the start) and the hourly wind window sensible.
+MAX_RIDE_KM = 250.0
+
 
 def generate_candidates(lat, lng, target_km, ride_type, api_key,
                         n=8, timeout=40,
@@ -670,7 +676,7 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
     "out-and-back"); `n` is split across them. Directional shapes (out-and-back,
     lollipop) are aimed at `into_wind_bearing` first (so you ride out into the
     wind, home with a tailwind) with widening offsets for variety; everything is
-    still scored by `evaluate` afterward. ORS caps loop length at 100 km.
+    still scored by `evaluate` afterward. Rides are capped at MAX_RIDE_KM.
 
     `zone` (a dict with 'lat'/'lng' from zones.find_ride_zone) enables the
     "staging" shape: transit to that quiet ride zone, loop there scored on the
@@ -686,8 +692,9 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
     burst; the per-call 429 back-off in `_ors_directions` still applies. `workers=1`
     reproduces the old fully-serial behavior for debugging.
     """
-    if target_km > 100:
-        raise ValueError("OpenRouteService caps round trips at 100 km. Shorten the ride.")
+    if target_km > MAX_RIDE_KM:
+        raise ValueError(f"Rides are limited to {MAX_RIDE_KM:.0f} km "
+                         f"({MAX_RIDE_KM / 1.609344:.0f} mi). Shorten the ride.")
     if not api_key:
         raise ValueError("No OpenRouteService API key. Get a free one and pass --api-key "
                          "or set ORS_API_KEY.")
@@ -774,7 +781,7 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
                            "(OpenRouteService rate limit). Wait a minute and try again.")
     if not out:
         raise RuntimeError("No routes came back. Check the API key, or that the start "
-                           "point is on a routable road and distance <= 100 km.")
+                           "point is on a routable road.")
     return out
 
 
@@ -892,13 +899,20 @@ def _waytype_run_km(extras, coords, codes):
     return best
 
 
+# Lowest land on Earth is the Dead Sea shore (~-430 m); anything below this is an
+# SRTM void marker (-32768), not ground.
+NODATA_BELOW_M = -500.0
+
+
 def _smoothed_ascent(eles, spike_m=15.0, smooth_win=11, climb_threshold_m=2.0):
     """Total ascent (m) from an elevation series, robust to SRTM dropouts/noise.
 
     ORS just sums raw point-to-point deltas, so nodata dropouts (an elevation of
     0.0 in the middle of a 230 m plateau) and ordinary SRTM jitter inflate the
     total wildly — e.g. 1700 m of "climb" on a dead-flat Illinois loop. We:
-      1. treat <=0 as missing (nodata) and linearly interpolate across the gaps,
+      1. treat nodata (exactly 0.0, the dropout ORS sends, or an SRTM void below
+         NODATA_BELOW_M) as missing and linearly interpolate across the gaps. Real
+         ground below sea level (the Netherlands, Death Valley) is kept,
       2. median-filter residual isolated spikes,
       3. low-pass with a moving average,
       4. accumulate only rises past a small hysteresis threshold.
@@ -908,24 +922,25 @@ def _smoothed_ascent(eles, spike_m=15.0, smooth_win=11, climb_threshold_m=2.0):
     if n < 2:
         return 0.0
 
-    # 1) interpolate across nodata gaps (elevation <= 0)
+    # 1) interpolate across nodata gaps
+    ok = [x != 0.0 and x > NODATA_BELOW_M for x in eles]
     prev_valid = [None] * n
     last = None
     for i in range(n):
-        if eles[i] > 0.0:
+        if ok[i]:
             last = i
         prev_valid[i] = last
     next_valid = [None] * n
     nxt = None
     for i in range(n - 1, -1, -1):
-        if eles[i] > 0.0:
+        if ok[i]:
             nxt = i
         next_valid[i] = nxt
     if all(v is None for v in prev_valid) and all(v is None for v in next_valid):
         return 0.0
     e = list(eles)
     for i in range(n):
-        if eles[i] > 0.0:
+        if ok[i]:
             continue
         lo, hi = prev_valid[i], next_valid[i]
         if lo is None:

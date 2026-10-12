@@ -28,7 +28,7 @@ FIELD_RING_STEP_KM = 5.0     # ring radius rounded to this, so replans at a near
                              # distance reuse the cached forecast (wind barely changes
                              # over a few km)
 FIELD_HOURS_BEFORE = 1        # hours of forecast kept before the start ...
-FIELD_HOURS_AFTER = 12        # ... and after it (covers a 100 km ride at any pace)
+FIELD_HOURS_AFTER = 16        # ... and after it (a 250 km ride at ~10 mph)
 
 
 def get_wind(lat: float, lng: float, when: dt.datetime,

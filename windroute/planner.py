@@ -67,6 +67,9 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
         shape_list = [str(s).strip().lower() for s in shapes if str(s).strip()]
     to_km = 1.609344 if unit.lower().startswith("mi") else 1.0
     target_km = distance * to_km
+    if target_km > engine.MAX_RIDE_KM:            # before any lookups start
+        raise ValueError(f"Rides are limited to {engine.MAX_RIDE_KM:.0f} km "
+                         f"({engine.MAX_RIDE_KM / 1.609344:.0f} mi). Shorten the ride.")
     tolerance_km = tolerance * to_km
     speed_mph = (speed * to_km / 1.609344 if speed
                  else engine.DEFAULT_RIDE_SPEED_MPH)

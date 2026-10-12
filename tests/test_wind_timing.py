@@ -179,9 +179,9 @@ def test_staging_loop_timed_from_arrival():
 
 def test_open_meteo_multi_location_builds_field():
     """One request with several coordinates -> start Wind + a field over all points."""
-    times = [f"2026-06-21T{h:02d}:00" for h in range(24)]
-    one = {"hourly": {"time": times, "wind_speed_10m": [10.0] * 24,
-                      "wind_direction_10m": [270.0] * 24, "wind_gusts_10m": [15.0] * 24}}
+    times = [f"2026-06-{21 + h // 24}T{h % 24:02d}:00" for h in range(48)]
+    one = {"hourly": {"time": times, "wind_speed_10m": [10.0] * 48,
+                      "wind_direction_10m": [270.0] * 48, "wind_gusts_10m": [15.0] * 48}}
 
     class Resp:
         def __init__(self, n):
@@ -209,7 +209,8 @@ def test_open_meteo_multi_location_builds_field():
     assert len(seen["lat"].split(",")) == 1        # last call was the single-point one
     assert w.speed_mph == 10.0 and w.direction_from_deg == 270.0
     assert len(w.field.points) == 1 + wind.FIELD_RING_POINTS
-    assert w.field.hours[0] == -1.0 and w.field.hours[-1] == 12.0
+    assert w.field.hours[0] == -1.0
+    assert w.field.hours[-1] == float(wind.FIELD_HOURS_AFTER)
     d, s = w.field.at(*START, 2.0)
     assert abs(d - 270.0) < 1e-6 and abs(s - 10.0) < 1e-6
     assert len(single.field.points) == 1

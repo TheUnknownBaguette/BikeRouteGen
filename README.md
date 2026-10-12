@@ -61,7 +61,7 @@ pip install -r requirements.txt
 
 # 4. Get a free OpenRouteService key (one-time, in a browser):
 #    https://openrouteservice.org/dev/#/signup
-#    The free plan covers round trips up to 100 km.
+#    The free plan is 2,000 route requests a day (a plan uses about 12-15).
 
 # 5. Save the key permanently to your Windows user environment
 [Environment]::SetEnvironmentVariable("ORS_API_KEY", "PASTE_YOUR_KEY_HERE", "User")

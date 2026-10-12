@@ -21,7 +21,7 @@ import re
 import threading
 import time
 import uuid
-from collections import defaultdict
+from collections import defaultdict, deque
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -46,15 +46,42 @@ MAX_AGE_S = 3600                      # delete generated maps/gpx older than thi
 # SCALING CAVEAT: this state is per-process, so running multiple waitress threads/
 # workers or multiple instances multiplies the effective limit by that count. If you
 # ever raise the worker count, move this to a shared store (e.g. Redis) or the limit
-# silently weakens. See CODE_HEALTH_WORKPLAN Task D3.
-RL_MAX = 12                          # max plans ...
+# silently weakens. See docs/archive/CODE_HEALTH_WORKPLAN.md Task D3.
+# Both limits can be changed with environment variables on the host.
+RL_MAX = int(os.environ.get("RATE_LIMIT_PLANS", "30"))   # max plans ...
 RL_WINDOW_S = 300                    # ... per IP per this many seconds
 _rl_lock = threading.Lock()
 _rl_hits: dict[str, list[float]] = defaultdict(list)
 
+# Site-wide cap on OpenRouteService calls over the last 24 h. The per-IP limit above
+# keys on X-Forwarded-For, which a client can fake (Render passes the header through),
+# so on its own it can't stop one person burning the whole free quota (2,000/day).
+# This can't be dodged that way. Leave some headroom for the owner's own CLI use of
+# the same key. It's in memory, so it restarts when the host does; ORS's own quota
+# message is the backstop after that.
+SITE_ORS_PER_DAY = int(os.environ.get("SITE_ORS_PER_DAY", "1800"))
+DAY_S = 24 * 3600
+_ors_lock = threading.Lock()
+_ors_marks: deque = deque([(time.time(), 0)])   # (time, process ORS total) per plan
+
+
+def _site_quota_spent() -> bool:
+    """Note a plan starting; True when the site has used its ORS budget for the day.
+
+    Reads the process-wide call counter, so plans running at the same time are
+    counted exactly. The mark kept from just before the 24 h window makes the count
+    err on the high side, never the low one."""
+    now, total = time.time(), engine.ors_call_total()
+    with _ors_lock:
+        while len(_ors_marks) > 1 and _ors_marks[1][0] <= now - DAY_S:
+            _ors_marks.popleft()
+        _ors_marks.append((now, total))
+        return total - _ors_marks[0][1] >= SITE_ORS_PER_DAY
+
 
 def _client_ip() -> str:
-    """Best-effort client IP, honoring the host's proxy header."""
+    """Best-effort client IP, honoring the host's proxy header. Spoofable (see
+    SITE_ORS_PER_DAY), but right for everyone who isn't trying to dodge the limit."""
     fwd = request.headers.get("X-Forwarded-For", "")
     if fwd:
         return fwd.split(",")[0].strip()
@@ -244,6 +271,10 @@ def plan():
     if _rate_limited(_client_ip()):
         return _reshow(f, shapes, "Too many plans in a short time — this is a small "
                        "shared instance. Please wait a few minutes and try again.", 429)
+    if _site_quota_spent():
+        return _reshow(f, shapes, "This site has used up today's share of its free "
+                       "routing allowance. It frees up gradually over the next day; "
+                       "please try again later.", 429)
 
     # If the user picked an autocomplete suggestion (and didn't then edit the text),
     # route from its exact coordinates but keep the readable label for display.
@@ -262,7 +293,7 @@ def plan():
         result = planner.plan_routes(
             location=location_arg,
             location_label=label_override,
-            distance=_clamp(f.get("distance", 0), 1, 200, 30),
+            distance=_clamp(f.get("distance", 0), 1, 1000, 30),
             unit=unit,
             start=f.get("start", "now").strip() or "now",
             ride_type=ride_type,
@@ -367,7 +398,7 @@ def plan():
 
     # "Edit plan" goes back to the form with exactly these inputs.
     edit_pairs = [("edit", "1")] + list(f.items(multi=True))
-    dist = _clamp(f.get("distance", 0), 1, 200, 30)
+    dist = _clamp(f.get("distance", 0), 1, 1000, 30)
     meta = (f"{dist:g} {unit} {ride_type} · "
             f"{pace:g} {'km/h' if unit == 'km' else 'mph'} pace")
     # an approximate start is a warning the rider must see, not a collapsed note
