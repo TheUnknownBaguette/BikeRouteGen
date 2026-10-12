@@ -31,10 +31,10 @@ from pathlib import Path
 
 import requests
 
+from .geocode import USER_AGENT
+
 RWGPS_BASE = "https://ridewithgps.com/api/v1"
-USER_AGENT = "windroute/0.1 (personal cycling tool)"
 DEFAULT_TIMEOUT = 30
-METERS_PER_MILE = 1609.344
 
 
 class RwgpsError(RuntimeError):
@@ -67,7 +67,7 @@ def _json_or_raise(r: requests.Response, url: str) -> dict:
     try:
         return r.json()
     except ValueError:
-        raise RwgpsError(f"{url} returned non-JSON: {r.text[:300]}")
+        raise RwgpsError(f"{url} returned non-JSON: {r.text[:300]}") from None
 
 
 def _first(d: dict, *keys, default=None):

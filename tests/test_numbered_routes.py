@@ -9,7 +9,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from windroute import engine, planner, routing, surface
-from windroute.scoring import RouteWeights, evaluate
+from windroute.scoring import evaluate
 from windroute.models import Wind
 
 

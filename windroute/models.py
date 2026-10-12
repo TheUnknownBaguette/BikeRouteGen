@@ -125,7 +125,6 @@ class Candidate:
     head_back_mph: float = 0.0  # ... and on the second half, at your riding speed
     ride_hours: float = 0.0     # time to ride the scored route at your pace, slowed by
                                 # headwinds / sped up by tailwinds (0 = not computed)
-    surface_score: float = 0.0
     self_intersections: int = 0 # times the route crosses itself (tangle / messiness signal)
     total_score: float = 0.0
 

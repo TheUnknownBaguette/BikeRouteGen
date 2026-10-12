@@ -25,7 +25,7 @@ Every cutoff is a named constant so that tuning is a one-line edit.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import requests
 
@@ -96,8 +96,11 @@ class RegionProfile:
 
 # Per-cell cache so repeated plans in the same area don't re-hit Overpass within a
 # session. Key rounds the center to ~0.1 deg (~11 km) — the classifier is a coarse,
-# area-level read, so neighbouring starts share an answer.
+# area-level read, so neighbouring starts share an answer. Only real answers are
+# kept (a failed lookup is retried next time), and the oldest go first past the cap
+# so a long-running web server doesn't grow it forever.
 _CACHE: dict = {}
+_CACHE_MAX = 256
 
 
 def _cell_key(lat, lng, radius_km):
@@ -119,13 +122,10 @@ def classify_region(center, radius_km=DEFAULT_RADIUS_KM, timeout=90,
         return _CACHE[key]
 
     elements = _query_overpass(lat, lng, radius_km, timeout, url)
-    if elements is None:                       # fetch failed entirely
-        prof = RegionProfile("unknown", 0.15, {"error": "overpass-failed"},
+    if elements is None:                       # fetch failed entirely: not cached
+        return RegionProfile("unknown", 0.15, {"error": "overpass-failed"},
                              (lat, lng), radius_km,
                              note="region: OSM lookup failed; treating as unknown.")
-        if use_cache:
-            _CACHE[key] = prof
-        return prof
 
     features = _extract_features(elements, lat, lng, radius_km)
     relief = _sample_relief(lat, lng, radius_km, timeout)
@@ -135,6 +135,8 @@ def classify_region(center, radius_km=DEFAULT_RADIUS_KM, timeout=90,
     prof = RegionProfile(archetype, confidence, features, (lat, lng), radius_km,
                          note=_describe(archetype, confidence, features))
     if use_cache:
+        while len(_CACHE) >= _CACHE_MAX:
+            _CACHE.pop(next(iter(_CACHE)))
         _CACHE[key] = prof
     return prof
 

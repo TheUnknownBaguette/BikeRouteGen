@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import math
 import re
+from xml.sax.saxutils import escape
 
 from PIL import Image, ImageDraw, ImageFont
 
 from .engine import compass_label
+from .geocode import USER_AGENT
 
 try:
     from staticmap import StaticMap, Line, CircleMarker
@@ -25,7 +27,7 @@ def write_gpx(coords, path, name="WindRoute"):
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<gpx version="1.1" creator="windroute" '
         'xmlns="http://www.topografix.com/GPX/1/1">\n'
-        f' <trk><name>{name}</name><trkseg>\n{pts}\n </trkseg></trk>\n'
+        f' <trk><name>{escape(str(name))}</name><trkseg>\n{pts}\n </trkseg></trk>\n'
         '</gpx>\n'
     )
     with open(path, "w", encoding="utf-8") as f:
@@ -76,7 +78,7 @@ def render_map(candidate, wind, meta, path, size=(820, 820), tile_url=None):
     smap = StaticMap(
         w, h,
         url_template=tile_url or "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-        headers={"User-Agent": "windroute/0.1 (personal cycling tool)"},
+        headers={"User-Agent": USER_AGENT},
     )
     lnglat = [(lng, lat) for lat, lng in candidate.coords]   # staticmap wants (lon, lat)
     smap.add_line(Line(lnglat, "#1f6feb", 5))

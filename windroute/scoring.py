@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 
 from .cues import make_cues
 from .geometry import (_bearing, _destination, _haversine_km, _polyline_km,
-                       _self_intersections, compass_label)
+                       _self_intersections)
 from .models import Candidate, RouteOption, Wind, WindField
 from .routing import _LOOP_SIDES
 
@@ -285,8 +285,8 @@ W_SHARROW = 0.3             # per share of the ride on sharrows
 TURN_FREE_PER_KM = 0.62     # 1 turn per mile
 W_TURN = 0.16               # per extra turn per km (= 0.1 per turn per mile)
 
-# Tidiness penalty. ORS round_trip sometimes scatters via-points that make a loop
-# cross itself (visible tangles / knots). Penalize self-intersections per km beyond
+# Tidiness penalty. A snapped waypoint can make a loop cross itself (visible tangles
+# / knots; the old ORS round_trip shape did it often). Penalize self-intersections per km beyond
 # a small free band so that, among the seeds generated, the cleanest loop wins.
 # Retraced shapes (out-and-back / lollipop stem) don't self-cross, so this never
 # unfairly hits them. A couple of incidental crossings ride free.
@@ -527,9 +527,7 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
             c.ride_hours = _polyline_km(geom) / (max(1.0, speed_mph) * _MPH_TO_KMH)
             wind_norm = 0.5
 
-        # `surface_score` is the display figure (paved on road / unpaved on gravel);
-        # the SCORING is fully weights-driven, no ride-type branch in the formula.
-        c.surface_score = c.unpaved_frac if ride_type == "gravel" else c.paved_frac
+        # The scoring is fully weights-driven, no ride-type branch in the formula.
         # Road: a steep, ramping penalty on KNOWN gravel (0 weight on gravel rides).
         # Gravel: a diminishing-returns SEEK reward + a bonus for confirmed good
         # gravel (0 weight on road rides). Both ride types hard-avoid unrideable
@@ -564,7 +562,7 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
         turn_penalty = -max(0.0, c.turns / max(c.distance_km, 1.0) - w.turn_free_per_km)
         # Tidiness: count self-crossings on the scored geometry (the loop, for
         # staging) and penalize them per km beyond a small free band, so a tangled
-        # round_trip loop loses to a clean one.
+        # loop loses to a clean one.
         c.self_intersections = _self_intersections(geom)
         tidy_penalty = -max(0.0, c.self_intersections / max(_polyline_km(geom), 1.0)
                             - w.tidy_free_per_km)
@@ -589,50 +587,6 @@ def _route_bits(c: Candidate) -> list:
             or c.town_state_route_frac > TOWN_STATE_FREE_FRAC):
         bits.append(f"{state * 100:.0f}% on state routes")
     return bits
-
-
-def explain(best: Candidate, wind: Wind, ride_type: str) -> str:
-    """One-line human rationale for why this route was chosen."""
-    bits = [best.shape]
-    if not wind.known:
-        bits.append("no wind forecast")
-    elif best.wind_score < -0.2:
-        bits.append(f"wind line is compromised ({wind_summary(best)}; no good "
-                    f"option for this loop shape today)")
-    else:
-        bits.append(wind_summary(best))
-    if ride_type == "gravel":
-        gq = (f", {best.good_gravel_frac * 100:.0f}% good" if best.good_gravel_frac else "")
-        bits.append(f"{best.unpaved_frac * 100:.0f}% unpaved{gq}")
-    elif best.unpaved_frac < 0.01:
-        bits.append("no known gravel")
-    else:
-        bits.append(f"{best.unpaved_frac * 100:.0f}% known gravel")
-    if best.unrideable_frac > 0:
-        bits.append(f"{best.unrideable_frac * 100:.0f}% unrideable surface")
-    if (best.busy_frac <= BUSY_FREE_FRAC and best.poor_road_frac <= POOR_FREE_FRAC
-            and best.fast_road_frac <= FAST_FREE_FRAC
-            and best.national_route_frac <= NATIONAL_FREE_FRAC
-            and best.state_route_frac <= STATE_FREE_FRAC
-            and best.town_state_route_frac <= TOWN_STATE_FREE_FRAC):
-        bits.append("stays on quiet roads")
-    else:
-        bits.extend(_route_bits(best))
-        if best.busy_frac > BUSY_FREE_FRAC:
-            bits.append(f"{best.busy_frac * 100:.0f}% on busy highways")
-        if best.poor_road_frac > POOR_FREE_FRAC:
-            bits.append(f"{best.poor_road_frac * 100:.0f}% on busy arterials")
-        if best.fast_road_frac > FAST_FREE_FRAC:
-            bits.append(f"{best.fast_road_frac * 100:.0f}% on fast roads")
-    if best.bikelane_frac >= 0.05:
-        bits.append(f"{best.bikelane_frac * 100:.0f}% has a bike lane")
-    if best.path_frac >= 0.05:
-        if best.path_run_frac >= PATH_RUN_FREE_FRAC:
-            bits.append(f"{best.path_frac * 100:.0f}% on multiuse path "
-                        f"(one long {best.path_run_frac * 100:.0f}% stretch)")
-        else:
-            bits.append(f"{best.path_frac * 100:.0f}% on multiuse path (connectors)")
-    return "; ".join(bits)
 
 
 # --------------------------------------------------------------------------- #

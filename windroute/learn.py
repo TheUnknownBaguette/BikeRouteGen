@@ -311,8 +311,10 @@ def suggest_weight_changes(profile: dict) -> list[str]:
 
     lane = profile.get("bikelane_frac")
     if lane and lane["mean"] >= 0.10:
-        out.append(f"You favour on-road bike lanes (mean lane {lane['mean']*100:.0f}%); "
-                   f"raising the bonus W_BIKELANE={engine.W_BIKELANE} would match that.")
+        out.append(f"You favour on-road bike lanes (mean lane {lane['mean']*100:.0f}%). "
+                   f"Plans reward lanes only on busy roads (W_BIKELANE="
+                   f"{engine.W_BIKELANE}) plus sharrows anywhere (W_SHARROW="
+                   f"{engine.W_SHARROW}); raise those if lanes should pull harder.")
 
     wind = profile.get("wind")
     if wind:

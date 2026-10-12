@@ -13,14 +13,14 @@ requires-python = ">=3.9"   # discord_bot uses asyncio.to_thread (3.9+)
 # silently break a fresh install months from now. Keep these in sync with
 # requirements.txt (which run.bat installs for the double-click web-app path).
 dependencies = [
-    "requests>=2.31,<3",
+    "requests>=2.32.4,<3",
     "typer>=0.12,<1.0",
     "rich>=13.7,<16",
     "python-dateutil>=2.9,<3",
     "staticmap>=0.5.7,<1.0",
-    "Pillow>=10.0,<13",
-    "Flask>=3.0,<4",
-    "waitress>=3.0,<4",
+    "Pillow>=10.3,<13",
+    "Flask>=3.1.1,<4",
+    "waitress>=3.0.1,<4",
 ]
 
 [project.optional-dependencies]

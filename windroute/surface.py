@@ -1,7 +1,7 @@
 """Pluggable road-surface sources.
 
 The ORS directions response already carries bucketed `surface` extras
-(see `engine._surface_fractions`) — that's the zero-cost baseline. This module
+(see `routing._surface_fractions`) — that's the zero-cost baseline. This module
 adds an OpenStreetMap / Overpass source that reads the finer `surface`,
 `tracktype`, and `smoothness` tags directly, which tend to cover the county and
 township roads gravel riders actually care about better than ORS's buckets.
@@ -21,8 +21,10 @@ from collections import namedtuple
 
 import requests
 
+from .geocode import USER_AGENT
+from .geometry import _haversine_km
+
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-USER_AGENT = "windroute/0.1 (personal cycling tool)"
 
 # Overpass mirrors tried in order (work-plan Task 5 hardening). The main instance
 # (overpass-api.de) frequently 504s under load; the others answer the same query
@@ -259,15 +261,6 @@ def classify_tags(tags: dict) -> str | None:
 # --------------------------------------------------------------------------- #
 # Geometry helpers (no extra deps — local equirectangular approximation)
 # --------------------------------------------------------------------------- #
-def _haversine_km(p1, p2) -> float:
-    R = 6371.0
-    lat1, lon1 = map(math.radians, p1)
-    lat2, lon2 = map(math.radians, p2)
-    dlat, dlon = lat2 - lat1, lon2 - lon1
-    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    return 2 * R * math.asin(math.sqrt(a))
-
-
 def _pt_seg_dist_m(p, a, b) -> float:
     """Distance in metres from point p to segment a-b, all (lat, lng)."""
     lat0 = math.radians(p[0])
@@ -587,18 +580,6 @@ class OverpassSurface:
 
 
 # --------------------------------------------------------------------------- #
-# Surface-provider registry (work-plan Task 5)
-# --------------------------------------------------------------------------- #
-# OSM `surface=*` via `OverpassSurface` is the UNIVERSAL baseline (it runs
-# everywhere). Region-specific data — a state DOT surface layer, a county
-# road-commission GIS, or AADT traffic counts (work-plan Task 4b) — are OPTIONAL
-# providers discovered by admin boundary: a provider's `applies_to(lat, lng)`
-# gates it to its region, so adding/removing one changes only that region's reads.
-# The default registry is EMPTY (only the OSM baseline runs); real regional
-# providers (e.g. Indiana DOT LRSE_Surface_Type) plug in here without touching the
-# pipeline. A provider mutates candidate surface fields where it has data and
-# returns a short status note (or None).
-# --------------------------------------------------------------------------- #
 # Fast / multi-lane roads (GAME_PLAN item 4): OSM speed limits and lane counts
 # --------------------------------------------------------------------------- #
 # ORS only knows road class, so a 55 mph two-lane county highway (Gougar Rd near
@@ -676,7 +657,6 @@ def bike_markings(tags: dict) -> tuple:
 
 def maxspeed_mph(value) -> float | None:
     """'55 mph' -> 55, '80' (km/h, the OSM default unit) -> 49.7, else None."""
-    import re
     m = re.match(r"\s*(\d+(?:\.\d+)?)\s*(mph|km/h|kmh|kph)?\s*$", str(value or ""))
     if not m:
         return None
@@ -890,6 +870,18 @@ def fast_roads_near(lat, lng, reach_km, deadline_s=30) -> FastRoads:
     return cached_fast_roads(lat - dlat, lng - dlng, lat + dlat, lng + dlng, deadline_s)
 
 
+# --------------------------------------------------------------------------- #
+# Surface-provider registry (work-plan Task 5)
+# --------------------------------------------------------------------------- #
+# OSM `surface=*` via `OverpassSurface` is the UNIVERSAL baseline (it runs
+# everywhere). Region-specific data — a state DOT surface layer, a county
+# road-commission GIS, or AADT traffic counts (work-plan Task 4b) — are OPTIONAL
+# providers discovered by admin boundary: a provider's `applies_to(lat, lng)`
+# gates it to its region, so adding/removing one changes only that region's reads.
+# The default registry is EMPTY (only the OSM baseline runs); real regional
+# providers (e.g. Indiana DOT LRSE_Surface_Type) plug in here without touching the
+# pipeline. A provider mutates candidate surface fields where it has data and
+# returns a short status note (or None).
 class SurfaceProvider:
     """Base class for an optional regional surface-data provider.
 

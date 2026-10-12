@@ -183,7 +183,10 @@
         L.DomEvent.stopPropagation(e);
         if (selected === r.id) openSV(e.latlng); else select(r.id, { from: "map" });
       });
-      r.line.bindTooltip(r.title, { sticky: true, direction: "top", opacity: 0.9 });
+      // as text, not HTML: on a shared page the title comes from the link itself
+      var tip = document.createElement("span");
+      tip.textContent = r.title || "";
+      r.line.bindTooltip(tip, { sticky: true, direction: "top", opacity: 0.9 });
     });
 
     var start = routes[0].coords[0];

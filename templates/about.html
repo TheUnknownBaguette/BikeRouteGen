@@ -39,8 +39,26 @@
         <a href="https://open-meteo.com/">Open-Meteo</a> and the
         <a href="https://www.weather.gov/">US National Weather Service</a> (wind),
         <a href="https://nominatim.org/">OpenStreetMap Nominatim</a> (address geocoding),
-        and the <a href="https://overpass-api.de/">Overpass API</a> (road surface and
-        bike-lane data). Each has its own privacy policy.</li>
+        <a href="https://photon.komoot.io/">Photon by komoot</a> (the address suggestions
+        while you type: what you type is sent as you type it),
+        and the <a href="https://overpass-api.de/">Overpass API</a> (road surface,
+        speed-limit and bike-lane data). These requests go from this server, not your
+        browser. Each service has its own privacy policy.</li>
+      <li><strong>Map tiles.</strong> Your browser loads the map images directly from
+        <a href="https://operations.osmfoundation.org/policies/tiles/">OpenStreetMap</a>,
+        <a href="https://www.cyclosm.org/">CyclOSM</a> (OpenStreetMap France) or
+        <a href="https://opentopomap.org/">OpenTopoMap</a>, depending on the map style,
+        so those servers see your IP address and the map area you view.</li>
+      <li><strong>Stored in your browser only.</strong> Your recent start points, your
+        last map position, your map style and (only if the site asks for one) the Ride
+        with GPS passphrase are saved in this browser
+        (localStorage) so the form remembers them. Nothing here is sent anywhere, except
+        the passphrase, which goes to this site when you send a route. Clear your site
+        data to remove them.</li>
+      <li><strong>&ldquo;Send to Ride with GPS&rdquo;</strong> (when shown) uploads that
+        route to the site owner&rsquo;s Ride with GPS account and makes it
+        <strong>public</strong> there, including where it starts. Only use it on routes
+        you&rsquo;re happy to share.</li>
       <li><strong>Generated files.</strong> The route maps and GPX files made for your
         request are written to the server temporarily and automatically deleted after
         about an hour. They are served over an unguessable link but are not otherwise

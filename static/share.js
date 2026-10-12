@@ -103,7 +103,11 @@
       if (!d || d.v !== VERSION || !Array.isArray(d.r) || !d.r.length) throw new Error("bad share link");
       var routes = d.r.map(function (r, i) {
         var lat = undeltas(r.la, 1e5), lng = undeltas(r.ln, 1e5);
-        return { id: i, color: r.co, pick: !!r.pk, title: r.t, meta: r.m, card: r.c || {},
+        // The link is untrusted input: the color goes into SVG/CSS markup, so only
+        // a plain hex color gets through; text fields are always shown as text.
+        var color = /^#[0-9a-f]{3,8}$/i.test(r.co) ? r.co : "#7c3aed";
+        return { id: i, color: color, pick: !!r.pk, title: String(r.t == null ? "" : r.t),
+                 meta: String(r.m == null ? "" : r.m), card: r.c || {},
                  coords: lat.map(function (a, k) { return [a, lng[k]]; }),
                  eles: undeltas(r.el || [], 1) };
       });

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-
+import threading
 import time
 
 import requests
@@ -11,11 +11,14 @@ import requests
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 PHOTON_URL = "https://photon.komoot.io/api"   # OSM geocoder built for type-ahead
-USER_AGENT = "windroute/0.1 (personal cycling tool)"
+# Sent to every outside service. Nominatim, the OSM tile servers and the US NWS all
+# ask for a User-Agent that names the app and gives a way to reach its maintainer.
+USER_AGENT = ("windroute/0.1 (cycling route planner; "
+              "+https://github.com/TheUnknownBaguette/BikeRouteGen)")
 
 
 # --------------------------------------------------------------------------- #
-# Geocoding + wind (Open-Meteo, free, no key)
+# Geocoding (Open-Meteo / Nominatim / Photon, free, no key)
 # --------------------------------------------------------------------------- #
 _US_STATES = {
     "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
@@ -209,15 +212,17 @@ def suggest_places(query: str, count: int = 6, near=None):
     if not items:
         items = _suggest_openmeteo(q, count)
     if items:                                   # don't cache an outage
-        if len(_SUGGEST_CACHE) >= SUGGEST_CACHE_MAX:
-            _SUGGEST_CACHE.pop(next(iter(_SUGGEST_CACHE)))      # drop the oldest
-        _SUGGEST_CACHE[key] = (time.time(), items)
+        with _SUGGEST_LOCK:                     # the web server runs several threads
+            while len(_SUGGEST_CACHE) >= SUGGEST_CACHE_MAX:
+                _SUGGEST_CACHE.pop(next(iter(_SUGGEST_CACHE)))  # drop the oldest
+            _SUGGEST_CACHE[key] = (time.time(), items)
     return items
 
 
 SUGGEST_TTL_S = 15 * 60
 SUGGEST_CACHE_MAX = 2000
 _SUGGEST_CACHE: dict = {}                       # insertion-ordered: oldest first
+_SUGGEST_LOCK = threading.Lock()
 
 
 def _suggest_photon(query: str, count: int, bias=None):

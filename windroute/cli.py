@@ -454,8 +454,10 @@ def rwgps_login(
         None, "--email", help="Account email - only for the password fallback."),
     password: str = typer.Option(
         None, "--password",
-        help="Account password - only if you can't paste an --auth-token. Exchanged "
-             "for a token, never stored."),
+        help="Account password - only if you can't paste an --auth-token. Leave it "
+             "off and you're asked for it without it echoing (a password typed on "
+             "the command line lands in your shell history). Exchanged for a "
+             "token, never stored."),
 ):
     """Save RWGPS credentials. Paste --auth-token (no password), or use --email/--password.
 
@@ -463,6 +465,8 @@ def rwgps_login(
     ridewithgps.com/settings/developers, open its edit page, click 'Create new
     Auth Token', then run this with --api-key and --auth-token.
     """
+    if email and not password and not auth_token:
+        password = typer.prompt("Ride with GPS password", hide_input=True)
     try:
         if auth_token:
             user_id = None
@@ -472,7 +476,7 @@ def rwgps_login(
                     user_id = rwgps._first(user, "id", "user_id")
                 except rwgps.RwgpsError as exc:
                     raise typer.BadParameter(
-                        f"That api_key/auth_token pair was rejected: {exc}")
+                        f"That api_key/auth_token pair was rejected: {exc}") from None
         elif email and password:
             with console.status("[cyan]Authenticating with Ride with GPS…"):
                 auth_token, user_id = rwgps.get_auth_token(email, password, api_key)
@@ -769,7 +773,6 @@ def classify(
     suburban-sprawl / coastal / arid-open / unknown, with the feature vector that
     drove the call. Diagnostic foundation for location-aware tuning.
     """
-    from . import regions
     try:
         with console.status("[cyan]Reading the area (roads, land use, relief)…"):
             lat, lng, label = engine.geocode(location)

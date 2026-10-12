@@ -7,14 +7,14 @@ recommended route plus two alternatives, each with its map and a GPX download.
     pip install -r requirements.txt
     python webapp.py            # or double-click run.bat
 
-It binds to 127.0.0.1 only (local machine, not exposed to your network). Reads the
-OpenRouteService key from ORS_API_KEY, exactly like the CLI.
+Run directly it binds to 127.0.0.1 (this machine only) unless HOST says otherwise;
+a host runs it with waitress instead (see Procfile). Reads the OpenRouteService key
+from ORS_API_KEY, exactly like the CLI.
 """
 from __future__ import annotations
 
 import datetime as dt
 import hmac
-import logging
 import math
 import os
 import re
@@ -122,6 +122,20 @@ FORM_DEFAULTS = {
     "candidates": "12", "corrections": True, "classify": False, "refine": False,
 }
 ALL_SHAPES = ["loop", "lollipop", "rectangle", "out-and-back"]
+RIDE_TYPES = ("road", "gravel")
+UNITS = ("mi", "km")
+SURFACE_SOURCES = ("ors", "osm", "both")
+
+
+def _choice(value, allowed, default):
+    """`value` if it's one of `allowed`, else `default`. The form only offers these,
+    but a hand-made request can send anything, and some of these values end up in
+    file names and GPX/TCX text."""
+    return value if value in allowed else default
+
+
+def _form_shapes(f):
+    return [s for s in f.getlist("shapes") if s in ALL_SHAPES] or FORM_DEFAULTS["shapes"]
 
 
 def _sweep_old_files():
@@ -133,6 +147,8 @@ def _sweep_old_files():
                 f.unlink()
         except OSError:
             pass
+    for gpx in [g for g in _rwgps_sent if not (OUT_DIR / g).exists()]:
+        _rwgps_sent.pop(gpx, None)            # its file is gone, so it can't be re-sent
 
 
 # Hidden fields that carry an exact picked start point through an "Edit plan" trip.
@@ -144,7 +160,7 @@ def _form_values(f):
     """Form values from a submitted form or query string, over the defaults."""
     vals = {**FORM_DEFAULTS, **{k: f.get(k, "") for k in FORM_DEFAULTS
                                 if k not in ("shapes",) + CHECKBOXES}}
-    vals["shapes"] = f.getlist("shapes") or FORM_DEFAULTS["shapes"]
+    vals["shapes"] = _form_shapes(f)
     for k in CHECKBOXES:
         vals[k] = k in f
     for k in PICKED_FIELDS:
@@ -221,7 +237,9 @@ def _reshow(f, shapes, error, status):
 @app.route("/plan", methods=["POST"])
 def plan():
     f = request.form
-    shapes = f.getlist("shapes") or FORM_DEFAULTS["shapes"]
+    shapes = _form_shapes(f)
+    ride_type = _choice(f.get("ride_type"), RIDE_TYPES, "road")
+    unit = _choice(f.get("unit"), UNITS, "mi")
 
     if _rate_limited(_client_ip()):
         return _reshow(f, shapes, "Too many plans in a short time — this is a small "
@@ -245,11 +263,11 @@ def plan():
             location=location_arg,
             location_label=label_override,
             distance=_clamp(f.get("distance", 0), 1, 200, 30),
-            unit=f.get("unit", "mi"),
+            unit=unit,
             start=f.get("start", "now").strip() or "now",
-            ride_type=f.get("ride_type", "road"),
+            ride_type=ride_type,
             shapes=shapes,
-            surface_source=f.get("surface_source", "ors"),
+            surface_source=_choice(f.get("surface_source"), SURFACE_SOURCES, "ors"),
             ride_area=(f.get("ride_area", "").strip() or None),
             tolerance=_clamp(f.get("tolerance", 3), 0, 50, 3),
             speed=_clamp(f.get("speed", 17), 3, 40, 17),
@@ -277,8 +295,6 @@ def plan():
 
     _sweep_old_files()
     token = uuid.uuid4().hex[:8]
-    ride_type = f.get("ride_type", "road")
-    unit = "km" if f.get("unit", "mi") == "km" else "mi"
     per_unit = 1.0 if unit == "km" else 1.0 / 1.609344
     wind = result.wind
     pace = _clamp(f.get("speed", 17), 3, 40, 17)
@@ -530,7 +546,6 @@ def _open_browser(port):
 
 
 if __name__ == "__main__":
-    import threading
     # HOST/PORT come from the environment so this one file runs both ways:
     #   - locally (defaults to 127.0.0.1:5000 and pops your browser), and
     #   - on your own box later (set HOST=0.0.0.0 to expose it on your network).

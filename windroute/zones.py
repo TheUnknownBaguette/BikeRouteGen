@@ -23,7 +23,7 @@ from dataclasses import dataclass
 import requests
 
 from .engine import _bearing, _haversine_km, _destination
-from .surface import OVERPASS_URL, USER_AGENT, overpass_json
+from .surface import OVERPASS_URL, overpass_json
 
 # OSM highway classes. The quiet rural grid is the positive signal; arterials are
 # the thing to ride away from. Residential is deliberately omitted — suburbs are

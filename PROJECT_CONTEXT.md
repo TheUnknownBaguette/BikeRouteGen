@@ -454,9 +454,11 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   as the ride. So short trail segments stitching roads ride free; one long stretch (e.g.
   an out-and-back on a trail) gets hit. `W_PATH=0.6`. Run measured by `_waytype_run_km`
   (ORS positional `extras.waytype.values`) / `OverpassSurface.path_run_frac` (OSM).
-- **Bike lanes** (on-road `cycleway=*` tags — invisible to ORS, OSM-only): a bonus
-  (`W_BIKELANE=0.6`, bumped from 0.4 — trip history shows the owner actively seeks lanes).
-  `bikelane_frac`, "Lane %" column (only under `--surface-source osm|both`).
+- **Bike lanes** (on-road `cycleway=*` tags — invisible to ORS, OSM-only): measured as
+  `bikelane_frac` ("Lane %" column, lanes option; only under `--surface-source osm|both`).
+  The SCORED bonus is now the Oct 2026 markings rule (painted lane on a busy road
+  `W_BIKELANE=0.3`, sharrows `W_SHARROW=0.3`; see "Turns + bike markings"), which
+  replaced the old flat 0.6 any-lane bonus.
 - **Learn from Ride with GPS history** (`rwgps-login` / `import` / `learn`): import recorded
   trips, measure the scorer's features on them + geometry it doesn't model (distance, outbound
   direction, shape via RWGPS `track_type`, real surface/path-run/lane fractions, and actual

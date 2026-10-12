@@ -310,9 +310,10 @@ old entries.
 
 ## Honest limitations
 
-- **Traffic** isn't a clean free data layer. Routes do penalize time on arterial
-  "State Road" class (US-highways) via ORS waytype, and you can mark busy roads
-  yourself, but there's no per-road car-traffic feed. Eyeball + correct as you go.
+- **Traffic** isn't a clean free data layer. Routes are steered off busy roads using
+  proxies: ORS road class and bike-suitability ratings, OpenStreetMap speed limits,
+  lane counts and route numbers (US / state routes), and any busy roads you mark
+  yourself. There's no per-road car-count feed, so eyeball + correct as you go.
 - **Gravel** relies on OpenStreetMap `surface` tags, which are incomplete. Treat
   the gravel % as a hint; `--surface-source osm`, `both`, and your correction
   cache are how you inject reality. Street View still wins for surface truth. When the

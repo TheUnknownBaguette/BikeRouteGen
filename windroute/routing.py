@@ -661,7 +661,7 @@ ORS_MAX_WORKERS = 6   # candidate ORS calls in flight at once (free tier ~40 req
 
 
 def generate_candidates(lat, lng, target_km, ride_type, api_key,
-                        n=8, timeout=40, sleep=0.4,
+                        n=8, timeout=40,
                         shapes=("loop",), into_wind_bearing=None, zone=None,
                         loop_geom=None, workers=ORS_MAX_WORKERS):
     """Generate `n` candidate routes of ~target_km from (lat, lng).
@@ -684,9 +684,7 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
     is an independent round-trip). The default turns ~12 sequential calls into a few
     batches — the bulk of the per-plan latency — while staying inside the free-tier
     burst; the per-call 429 back-off in `_ors_directions` still applies. `workers=1`
-    reproduces the old fully-serial behavior for debugging. `sleep` is retained for
-    backward compatibility but is no longer used (concurrency replaces the manual
-    inter-call pacing).
+    reproduces the old fully-serial behavior for debugging.
     """
     if target_km > 100:
         raise ValueError("OpenRouteService caps round trips at 100 km. Shorten the ride.")

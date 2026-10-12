@@ -498,8 +498,8 @@ def _set_traffic(c, src):
             km["fast"] += d
     if total <= 0:
         return
-    for tier, field in _TIER_FIELD.items():
-        setattr(c, field, km[tier] / total)
+    for tier, attr in _TIER_FIELD.items():
+        setattr(c, attr, km[tier] / total)
     c.busy_lane_frac, c.sharrow_frac = km["lane"] / total, km["sharrow"] / total
     if classed:
         c.busy_frac, c.poor_road_frac = km["busy"] / total, km["poor"] / total
