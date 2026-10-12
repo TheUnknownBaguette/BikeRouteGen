@@ -301,7 +301,12 @@ def plan():
             "gravel_pct": c.unpaved_frac * 100,
             # busy highways + poor-for-bike arterials + fast roads: all "busy road"
             "hwy_pct": c.traffic_frac * 100,
-            "path_pct": c.path_frac * 100, "lane_pct": c.bikelane_frac * 100,
+            "path_pct": c.path_frac * 100,
+            # painted lanes (any road, --surface-source osm) or the scored markings:
+            # lanes on busy roads + sharrows (every plan)
+            "lane_pct": max(c.bikelane_frac, c.busy_lane_frac + c.sharrow_frac) * 100,
+            "turns": c.turns,
+            "turns_per": c.turns / max(c.distance_km * per_unit, 0.1),
             "unrideable_pct": c.unrideable_frac * 100, "score": c.total_score,
             "gpx": f"{base.name}.gpx", "dlname": f"{dlnames[i]}.gpx",
             "rw_name": f"{result.when:%b} {result.when.day} · {dist_num} {unit} "
@@ -373,7 +378,8 @@ CANDIDATE_COLOR = "#7c3aed"
 # Card fields carried in the page payload (and so in share links).
 SHARED_CARD_FIELDS = ("role", "headline", "rank", "shape", "dist", "climb", "ride_time",
                       "verdict", "wind_score", "wind_line", "reasons", "gravel_pct",
-                      "hwy_pct", "lane_pct", "unrideable_pct", "dlname")
+                      "hwy_pct", "lane_pct", "unrideable_pct", "dlname", "turns",
+                      "turns_per")
 
 
 def _field_json(wind):

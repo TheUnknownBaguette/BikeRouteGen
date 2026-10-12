@@ -447,6 +447,11 @@ def _set_traffic(c, src):
     """Charge each stretch of `c` to ONE traffic bucket, strongest claim first:
     numbered route (OSM ref) > ORS busy State Road > ORS poor-for-bikes > OSM fast.
 
+    Bike markings: a painted lane on a busy road (main class, or one ORS rates poor)
+    earns the lane bonus and isn't charged as poor - ORS rates by road class and
+    gives Bradley Ave's lane stretch the same 5/10 as IL 47. A lane on a quiet road
+    earns nothing (it's fine without). Sharrows earn their bonus on any road.
+
     The ORS class of each stretch rides on its road name (`routing.RoadName`). A
     candidate without it (built elsewhere) keeps ORS's busy / poor shares, and only
     what's left over is counted as numbered route / fast.
@@ -456,26 +461,35 @@ def _set_traffic(c, src):
         return
     names = names if names and len(names) == len(coords) else [""] * len(coords)
     classed = all(hasattr(n, "suit") for n in names)
-    km = {"busy": 0.0, "poor": 0.0, "fast": 0.0, **{t: 0.0 for t in _TIER_FIELD}}
+    km = {"busy": 0.0, "poor": 0.0, "fast": 0.0, "lane": 0.0, "sharrow": 0.0,
+          **{t: 0.0 for t in _TIER_FIELD}}
     total = 0.0
     for i, (a, b) in enumerate(zip(coords, coords[1:])):
         d = engine._haversine_km(a, b)
         total += d
-        fast, tier = src.kind(((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0), names[i])
-        if tier:
-            km[tier] += d
+        road = src.kind(((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0), names[i])
+        poor = (classed and names[i].suit is not None
+                and names[i].suit <= engine.SUIT_POOR_MAX)
+        busy_lane = road.lane and (road.main or poor)
+        if busy_lane:
+            km["lane"] += d
+        elif road.sharrow:
+            km["sharrow"] += d
+        if road.tier:
+            km[road.tier] += d
         elif not classed:
-            km["fast"] += d if fast else 0.0
-        elif getattr(names[i], "waytype", None) in engine.BUSY_WAYTYPES:
+            km["fast"] += d if road.fast else 0.0
+        elif names[i].waytype in engine.BUSY_WAYTYPES:
             km["busy"] += d
-        elif names[i].suit is not None and names[i].suit <= engine.SUIT_POOR_MAX:
+        elif poor and not busy_lane:
             km["poor"] += d
-        elif fast:
+        elif road.fast:
             km["fast"] += d
     if total <= 0:
         return
     for tier, field in _TIER_FIELD.items():
         setattr(c, field, km[tier] / total)
+    c.busy_lane_frac, c.sharrow_frac = km["lane"] / total, km["sharrow"] / total
     if classed:
         c.busy_frac, c.poor_road_frac = km["busy"] / total, km["poor"] / total
         c.fast_road_frac = km["fast"] / total

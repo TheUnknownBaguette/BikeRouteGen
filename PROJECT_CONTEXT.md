@@ -383,6 +383,24 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   which under-counted: e.g. 2.3 mi of W Bradley Ave (45 mph) west of Champaign now counts as
   fast. Candidate.traffic_frac sums every bucket for the "busy road" displays. Tests:
   `tests/test_numbered_routes.py`.
+- **Turns + bike markings** (Oct 2026, same Oct 11 ride: the plan left town through a
+  15-turn maze; the owner rode John St, sharrows + a lane, in 4). Why: ORS rates bikes by
+  road CLASS (Bradley Ave's painted-lane stretch, a secondary, is 5/10 like IL 47; John St
+  and every side street are 8) and charges nothing for a turn, so ties go to a hair-shorter
+  maze. ORS's road-bike profile gave 4 turns but via Springfield Ave (US 45/150). Fixes, in
+  scoring only (we can't reweight public ORS): **turn penalty** `W_TURN=0.16` per left/right
+  cue per km beyond `TURN_FREE_PER_KM=0.62` (1/mi; the owner rode 0.67/mi, generated routes
+  0.8-2.8/mi, 2-4/mi near home) - counted with `cues.make_cues` in `evaluate`
+  (`Candidate.turns`). **Bike markings** from the same background Overpass read
+  (`surface.bike_markings`, `RoadKind`): a painted lane counts ONLY on a busy road (OSM main
+  class or ORS-poor): that stretch isn't charged poor and earns `W_BIKELANE=0.3`
+  (`busy_lane_frac`); sharrows earn `W_SHARROW=0.3` anywhere (`sharrow_frac`). Owner wanted
+  these as a nudge against turns, not a pull (10% sharrows = +0.03). This REPLACED the old
+  flat lane bonus (0.6, any lane, only under `--surface-source osm`); `bikelane_frac` is still
+  measured there for cards + the lanes option. Cards show "N turns" (warn > 1.5/mi) and
+  "% bike lane / sharrows"; the compare table has a Turns column. Re-rank check: top picks
+  unchanged in Champaign/Mokena/Naperville; less-turny routes climb (Mokena 0.8/mi rectangle
+  #4 -> #2). Tests: `tests/test_turns_and_markings.py`.
 - **Plan speed** (Oct 2026): a slow plan was ~35 s, almost all of it waiting on outside
   services (Open-Meteo 17.8 s and Overpass 11.6 s in a bad moment; ORS ~4-5 s; our code
   ~0.5 s). Now: (1) the speed-limit lookup starts right after geocoding for the ride's

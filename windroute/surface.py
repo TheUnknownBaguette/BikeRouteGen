@@ -16,6 +16,7 @@ import math
 import re
 import threading
 import time
+from collections import namedtuple
 
 import requests
 
@@ -581,6 +582,20 @@ def route_tier(tags: dict) -> str | None:
 
 TIER_RANK = {None: 0, "town-state": 1, "state": 2, "national": 3}
 
+# Bike markings (owner, 2026-10-12): a painted lane only matters on a busy road (it
+# makes a main road rideable; a quiet street is fine without one), while sharrows
+# earn a small bonus anywhere - enough to tip a direct marked street over a maze of
+# side streets that ORS rates the same.
+PAINTED_LANE_VALUES = ("lane", "track", "buffered_lane", "opposite_lane", "opposite_track")
+SHARROW_VALUES = ("shared_lane", "share_busway", "opposite_share_busway")
+_CYCLEWAY_KEYS = ("cycleway", "cycleway:both", "cycleway:left", "cycleway:right")
+
+
+def bike_markings(tags: dict) -> tuple:
+    """(painted lane?, sharrows?) on a road way, from its cycleway=* tags."""
+    vals = {(tags.get(k) or "").lower() for k in _CYCLEWAY_KEYS}
+    return bool(vals & set(PAINTED_LANE_VALUES)), bool(vals & set(SHARROW_VALUES))
+
 
 def maxspeed_mph(value) -> float | None:
     """'55 mph' -> 55, '80' (km/h, the OSM default unit) -> 49.7, else None."""
@@ -615,13 +630,19 @@ def _road_keys(tags: dict) -> set:
     return keys
 
 
+# What the OSM index knows about the road a stretch is ON (see FastRoads.kind):
+# fast?, numbered-route tier, painted bike lane?, sharrows?, trunk/primary/secondary?
+RoadKind = namedtuple("RoadKind", "fast tier lane sharrow main",
+                      defaults=(False, None, False, False, False))
+
+
 class FastRoads:
     """Index of fast / multi-lane roads and numbered (state / US) routes around some
     routes, from one Overpass query.
 
-    `fraction(coords, names)` is the share of a route ridden ON fast roads;
-    `kind(p, name)` says whether a stretch is on a fast road and which numbered-route
-    tier it's on. A route stretch counts only when it's within `match_m` of the road
+    It also holds roads with painted bike lanes or sharrows. `fraction(coords,
+    names)` is the share of a route ridden ON fast roads; `kind(p, name)` says what
+    the road a stretch is on is (fast, numbered-route tier, bike markings). A route stretch counts only when it's within `match_m` of the road
     AND the route's road name (from ORS) matches the OSM name or ref, so a side path
     beside the road (common in suburbs) doesn't count as riding it.
     """
@@ -653,48 +674,55 @@ class FastRoads:
         bb = f"({s},{w},{n},{e})"
         hw = "|".join(ROAD_HIGHWAYS)
         main = "|".join(MAIN_HIGHWAYS)
+        marks = "|".join(PAINTED_LANE_VALUES + SHARROW_VALUES)
         # server-side prefilter (numbers >= 40, 4+ lanes, numbered main roads); the
         # exact tests are is_fast_road / route_tier
         query = (f"[out:json][timeout:{timeout}];("
                  f'way["highway"~"^({hw})$"]["maxspeed"~"^([4-9][0-9]|1[0-9][0-9])"]{bb};'
                  f'way["highway"~"^({hw})$"]["lanes"~"^([4-9]|1[0-9])"]{bb};'
-                 f'way["highway"~"^({main})$"]["ref"]{bb};);'
+                 f'way["highway"~"^({main})$"]["ref"]{bb};'
+                 f'way["highway"~"^({hw})$"][~"^cycleway(:both|:left|:right)?$"~"^({marks})$"]{bb};);'
                  f"out tags geom;")
         for el in overpass_json(query, timeout, deadline_s=deadline_s):
             tags = el.get("tags", {})
             fast, tier = is_fast_road(tags), route_tier(tags)
-            if not fast and tier is None:
+            lane, sharrow = bike_markings(tags)
+            if not (fast or tier or lane or sharrow):
                 continue
+            info = RoadKind(fast, tier, lane, sharrow,
+                            (tags.get("highway") or "") in MAIN_HIGHWAYS)
             keys = _road_keys(tags)
             if not keys:
                 continue                      # can't confirm we're on it; don't guess
             geom = [(g["lat"], g["lon"]) for g in el.get("geometry") or []]
             for a, b in zip(geom, geom[1:]):
                 for cell in {self._cell(*a), self._cell(*b)}:
-                    self._grid.setdefault(cell, []).append((a, b, keys, fast, tier))
+                    self._grid.setdefault(cell, []).append((a, b, keys, info))
             self.way_count += 1
         return self
 
-    def kind(self, p, name):
-        """(on a fast road?, numbered-route tier or None) for the stretch at point p
-        whose ORS road name is `name`."""
+    def kind(self, p, name) -> RoadKind:
+        """What the road under the stretch at point p (ORS road name `name`) is:
+        fast?, numbered-route tier, painted lane?, sharrows?, main-road class?"""
         name = (name or "").lower()
         if not name:
-            return False, None
-        fast, tier = False, None
+            return RoadKind()
+        fast = lane = sharrow = main = False
+        tier = None
         ci, cj = self._cell(*p)
         for di in (-1, 0, 1):
             for dj in (-1, 0, 1):
-                for a, b, keys, f, t in self._grid.get((ci + di, cj + dj), ()):
+                for a, b, keys, info in self._grid.get((ci + di, cj + dj), ()):
                     if (_pt_seg_dist_m(p, a, b) <= self.match_m
                             and any(k in name for k in keys)):
-                        fast = fast or f
-                        if TIER_RANK[t] > TIER_RANK[tier]:
-                            tier = t
-        return fast, tier
+                        fast, lane = fast or info.fast, lane or info.lane
+                        sharrow, main = sharrow or info.sharrow, main or info.main
+                        if TIER_RANK[info.tier] > TIER_RANK[tier]:
+                            tier = info.tier
+        return RoadKind(fast, tier, lane, sharrow, main)
 
     def _on_fast(self, p, name):
-        return self.kind(p, name)[0]
+        return self.kind(p, name).fast
 
     def fraction(self, coords, names) -> float:
         if len(coords) < 2:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 
+from .cues import make_cues
 from .geometry import (_bearing, _destination, _haversine_km, _polyline_km,
                        _self_intersections, compass_label)
 from .models import Candidate, RouteOption, Wind, WindField
@@ -263,13 +264,26 @@ PATH_RUN_FREE_FRAC = 0.25    # a contiguous path run up to 1/4 of the route = a 
 W_PATH = 0.6                 # bumped from 0.35: now bites only on long runs, so it can
                              # be stronger without punishing the connector use he likes
 
-# On-road bike-lane bonus (OSM-only; ORS waytype can't see lanes tagged on roads).
-# A flat-ish reward for riding roads with a dedicated lane — the rider loves these.
-# Applies to both ride types. Only nonzero when --surface-source osm|both consulted.
-# Bumped 0.4 -> 0.6 after RWGPS trip analysis (2026-06-13): the rider's real rides
-# average ~19% on-road bike lane (p90 36%), i.e. he actively seeks them, so the
-# bonus was under-rewarding lanes relative to how much he values them.
-W_BIKELANE = 0.6
+# Bike-marking bonuses (owner, 2026-10-12), from the background OSM read on every
+# plan. A painted lane only counts on a BUSY road (it makes a main road rideable;
+# a quiet street needs none); sharrows count anywhere. Deliberately small - a nudge
+# so a direct marked street beats a maze of side streets ORS rates the same, not a
+# pull across town: 10% of a ride on sharrows = +0.03, about what ~5 extra turns on
+# a 30 mi ride cost (TURN_* below).
+# History: the old flat W_BIKELANE (0.6, any lane, only under --surface-source osm,
+# bumped from 0.4 after the June 2026 trip analysis) is replaced by this rule;
+# bikelane_frac is still measured under osm for the cards and the lanes option.
+W_BIKELANE = 0.3            # per share of the ride on a busy road with a painted lane
+W_SHARROW = 0.3             # per share of the ride on sharrows
+
+# Turn penalty (owner, 2026-10-12): ORS charges nothing for a turn on a bike, so two
+# routes it rates the same go whichever way is a hair shorter - often a 15-turn maze
+# of side streets out of town. Charged per km on the turns the cue sheet would show
+# (left/right, not "continue"), beyond a free band of ~1 turn per mile (the owner's
+# own Oct 11 ride: 0.67/mi; generated routes ran 0.8-2.8/mi, 2-4/mi near home).
+# 0.1 per extra turn/mi: a 2.7/mi route loses ~0.17, a 1.5/mi one ~0.05.
+TURN_FREE_PER_KM = 0.62     # 1 turn per mile
+W_TURN = 0.16               # per extra turn per km (= 0.1 per turn per mile)
 
 # Tidiness penalty. ORS round_trip sometimes scatters via-points that make a loop
 # cross itself (visible tangles / knots). Penalize self-intersections per km beyond
@@ -333,7 +347,10 @@ class RouteWeights:
     town_state_free_frac: float = TOWN_STATE_FREE_FRAC
     w_path: float = W_PATH
     path_run_free_frac: float = PATH_RUN_FREE_FRAC
-    w_bikelane: float = W_BIKELANE
+    w_bikelane: float = W_BIKELANE     # painted lane on a busy road
+    w_sharrow: float = W_SHARROW
+    w_turn: float = W_TURN
+    turn_free_per_km: float = TURN_FREE_PER_KM
     w_tidy: float = W_TIDY
     tidy_free_per_km: float = TIDY_FREE_PER_KM
 
@@ -372,7 +389,7 @@ WEIGHTS_BY_ARCHETYPE = {
     "coastal": RouteWeights(w_path=0.45, path_run_free_frac=0.30),
     # Suburban: protected lanes/paths matter most for safety; reward lanes more
     # and don't over-punish path runs (often the safest line out of a suburb).
-    "suburban-sprawl": RouteWeights(w_bikelane=0.8, w_path=0.45,
+    "suburban-sprawl": RouteWeights(w_bikelane=0.4, w_path=0.45,
                                     path_run_free_frac=0.35),
     # Arid-open: like grid-farmland but emptier; keep the baseline.
     "arid-open": _GRID_FARMLAND_WEIGHTS,
@@ -541,7 +558,10 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
         # Penalize only the LONGEST contiguous path run beyond the connector band,
         # so trails used to link roads ride free but a long path stretch doesn't.
         path_penalty = -max(0.0, c.path_run_frac - w.path_run_free_frac)
-        lane_bonus = c.bikelane_frac                  # 0 unless OSM was consulted
+        lane_bonus = c.busy_lane_frac                 # 0 unless the OSM read came back
+        c.turns = sum(1 for q in make_cues(c.coords, c.road_names)
+                      if q["type"] in ("Left", "Right"))
+        turn_penalty = -max(0.0, c.turns / max(c.distance_km, 1.0) - w.turn_free_per_km)
         # Tidiness: count self-crossings on the scored geometry (the loop, for
         # staging) and penalize them per km beyond a small free band, so a tangled
         # round_trip loop loses to a clean one.
@@ -553,6 +573,7 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
                          + (w.w_poor * poor_penalty) + (w.w_fast * fast_penalty)
                          + route_penalty
                          + (w.w_path * path_penalty) + (w.w_bikelane * lane_bonus)
+                         + (w.w_sharrow * c.sharrow_frac) + (w.w_turn * turn_penalty)
                          + (w.w_tidy * tidy_penalty))
 
     return sorted(candidates, key=lambda c: c.total_score, reverse=True)

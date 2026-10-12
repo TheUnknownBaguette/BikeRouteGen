@@ -134,6 +134,7 @@
     dist: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h18M3 12l4-4M3 12l4 4M21 12l-4-4M21 12l-4 4"/></svg>',
     time: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
     climb: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18l6-8 4 5 3-4 5 7z"/></svg>',
+    turn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20v-7a4 4 0 0 1 4-4h10M15 5l4 4-4 4"/></svg>',
     dl: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>'
   };
   function stat(cls, html) { return '<span class="stat ' + (cls || "") + '">' + html + "</span>"; }
@@ -145,7 +146,8 @@
     s += stat(ws > 0.2 ? "good" : ws < -0.2 ? "bad" : "", esc(c.verdict));
     if (c.gravel_pct >= 1) s += stat(rideType === "gravel" ? "good" : "", Math.round(c.gravel_pct) + "% " + (rideType === "gravel" ? "unpaved" : "gravel"));
     if (c.hwy_pct >= 5) s += stat("warn", Math.round(c.hwy_pct) + "% busy road");
-    if (c.lane_pct >= 1) s += stat("good", Math.round(c.lane_pct) + "% bike lane");
+    if (c.lane_pct >= 1) s += stat("good", Math.round(c.lane_pct) + "% bike lane / sharrows");
+    if (c.turns) s += stat(+c.turns_per > (c.dist && / km$/.test(c.dist) ? 0.93 : 1.5) ? "warn" : "", IC.turn + esc(c.turns) + " turns");
     if (c.unrideable_pct > 0) s += stat("bad", Math.round(c.unrideable_pct) + "% unrideable");
     var why = (c.reasons || []).map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("");
     return '<div class="rcard' + (r.pick ? "" : " compact") + '" role="button" tabindex="0" data-route="' + r.id +

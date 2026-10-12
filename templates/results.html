@@ -26,7 +26,8 @@
       <span class="stat {{ 'good' if r.wind_score > 0.2 else 'bad' if r.wind_score < -0.2 }}">{{ r.verdict }}</span>
       {% if r.gravel_pct >= 1 %}<span class="stat {{ 'good' if ride_type == 'gravel' }}">{{ '%.0f'|format(r.gravel_pct) }}% {{ 'unpaved' if ride_type == 'gravel' else 'gravel' }}</span>{% endif %}
       {% if r.hwy_pct >= 5 %}<span class="stat warn">{{ '%.0f'|format(r.hwy_pct) }}% busy road</span>{% endif %}
-      {% if r.lane_pct >= 1 %}<span class="stat good">{{ '%.0f'|format(r.lane_pct) }}% bike lane</span>{% endif %}
+      {% if r.lane_pct >= 1 %}<span class="stat good">{{ '%.0f'|format(r.lane_pct) }}% bike lane / sharrows</span>{% endif %}
+      {% if r.turns %}<span class="stat {{ 'warn' if r.turns_per > (0.93 if unit == 'km' else 1.5) else '' }}" title="{{ '%.1f'|format(r.turns_per) }} turns per {{ unit }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20v-7a4 4 0 0 1 4-4h10M15 5l4 4-4 4"/></svg>{{ r.turns }} turns</span>{% endif %}
       {% if r.unrideable_pct > 0 %}<span class="stat bad">{{ '%.0f'|format(r.unrideable_pct) }}% unrideable</span>{% endif %}
     </div>
     {% if r.reasons %}<ul class="why">{% for x in r.reasons %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
@@ -125,7 +126,7 @@
       <table class="cmp">
         <thead><tr>
           <th>#</th><th>Route</th><th>{{ unit }}</th><th>Time</th><th>Climb</th><th>Wind</th>
-          <th>{{ 'Unp' if ride_type == 'gravel' else 'Grv' }}%</th><th>Busy%</th><th>Path%</th><th>Score</th>
+          <th>{{ 'Unp' if ride_type == 'gravel' else 'Grv' }}%</th><th>Busy%</th><th>Path%</th><th>Turns</th><th>Score</th>
         </tr></thead>
         <tbody>
         {% for r in routes | sort(attribute='rank') %}
@@ -135,7 +136,7 @@
             <td>{{ r.dist_num }}</td><td>{{ r.ride_time or '–' }}</td><td>{{ r.climb }}</td>
             <td>{{ '%+.2f'|format(r.wind_score) }}</td>
             <td>{{ '%.0f'|format(r.gravel_pct) }}</td><td>{{ '%.0f'|format(r.hwy_pct) }}</td>
-            <td>{{ '%.0f'|format(r.path_pct) }}</td><td>{{ '%.2f'|format(r.score) }}</td>
+            <td>{{ '%.0f'|format(r.path_pct) }}</td><td>{{ r.turns }}</td><td>{{ '%.2f'|format(r.score) }}</td>
           </tr>
         {% endfor %}
         </tbody>

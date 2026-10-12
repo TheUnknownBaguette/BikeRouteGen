@@ -104,6 +104,9 @@ class Candidate:
                                 # (the connector-vs-destination signal: a short run is a
                                 # trail used to link roads; a long run is "riding the path")
     bikelane_frac: float = 0.0  # fraction on roads with an on-road bike lane (OSM only)
+    busy_lane_frac: float = 0.0 # on a BUSY road (main class or ORS-poor) with a painted lane
+    sharrow_frac: float = 0.0   # on a road with sharrows (shared-lane markings)
+    turns: int = 0              # left/right turns on the cue sheet (set by `evaluate`)
     good_gravel_frac: float = 0.0  # fraction on confirmed GOOD gravel (OSM quality; Task 3c)
     unrideable_frac: float = 0.0   # fraction on unrideable surface (mud/ground/grade5; OSM only)
     surface_by_source: dict = field(default_factory=dict)  # source name -> unpaved_frac
