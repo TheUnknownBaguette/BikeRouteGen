@@ -414,13 +414,13 @@ def _start_fast_roads(lat, lng, target_km):
 
 
 def _apply_fast_roads(cands, job=None):
-    """Set each candidate's fast_road_frac from the OSM lookup. Returns (note, src).
+    """Charge each candidate's traffic from the OSM lookup. Returns (note, src).
 
     `job` is the lookup started early (`_start_fast_roads`); a route that leaves its
-    area (a staged ride) gets one more lookup covering every route. Only the share
-    beyond busy_frac + poor_road_frac is kept, since those already charge the US
-    highways and arterials that are usually fast too. On failure the candidates
-    keep 0 and the note says the check was skipped.
+    area (a staged ride) gets one more lookup covering every route. The lookup finds
+    fast roads (speed limit / lanes) and numbered state / US routes; `_set_traffic`
+    then charges every stretch to exactly one bucket. On failure the candidates keep
+    ORS's busy / poor shares and the note says the check was skipped.
     """
     try:
         src = job.result(timeout=FAST_WAIT_S) if job is not None else None
@@ -435,13 +435,54 @@ def _apply_fast_roads(cands, job=None):
         return ("traffic: couldn't check speed limits right now (OpenStreetMap "
                 "lookup failed); ranked on road type only"), None
     for c in cands:
-        _set_fast(c, src)
+        _set_traffic(c, src)
     return "", src
 
 
-def _set_fast(c, src):
-    raw = src.fraction(c.coords, c.road_names)
-    c.fast_road_frac = max(0.0, raw - c.busy_frac - c.poor_road_frac)
+_TIER_FIELD = {"national": "national_route_frac", "state": "state_route_frac",
+               "town-state": "town_state_route_frac"}
+
+
+def _set_traffic(c, src):
+    """Charge each stretch of `c` to ONE traffic bucket, strongest claim first:
+    numbered route (OSM ref) > ORS busy State Road > ORS poor-for-bikes > OSM fast.
+
+    The ORS class of each stretch rides on its road name (`routing.RoadName`). A
+    candidate without it (built elsewhere) keeps ORS's busy / poor shares, and only
+    what's left over is counted as numbered route / fast.
+    """
+    coords, names = c.coords, c.road_names
+    if len(coords) < 2:
+        return
+    names = names if names and len(names) == len(coords) else [""] * len(coords)
+    classed = all(hasattr(n, "suit") for n in names)
+    km = {"busy": 0.0, "poor": 0.0, "fast": 0.0, **{t: 0.0 for t in _TIER_FIELD}}
+    total = 0.0
+    for i, (a, b) in enumerate(zip(coords, coords[1:])):
+        d = engine._haversine_km(a, b)
+        total += d
+        fast, tier = src.kind(((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0), names[i])
+        if tier:
+            km[tier] += d
+        elif not classed:
+            km["fast"] += d if fast else 0.0
+        elif getattr(names[i], "waytype", None) in engine.BUSY_WAYTYPES:
+            km["busy"] += d
+        elif names[i].suit is not None and names[i].suit <= engine.SUIT_POOR_MAX:
+            km["poor"] += d
+        elif fast:
+            km["fast"] += d
+    if total <= 0:
+        return
+    for tier, field in _TIER_FIELD.items():
+        setattr(c, field, km[tier] / total)
+    if classed:
+        c.busy_frac, c.poor_road_frac = km["busy"] / total, km["poor"] / total
+        c.fast_road_frac = km["fast"] / total
+    else:
+        routes = sum(km[t] for t in _TIER_FIELD) / total
+        c.fast_road_frac = max(0.0, km["fast"] / total - c.busy_frac - c.poor_road_frac)
+        c.poor_road_frac = max(0.0, c.poor_road_frac - routes)
 
 
 def _refine_candidates(cands, ranked, *, api_key, ride_type, wind, target_km,
@@ -469,7 +510,7 @@ def _refine_candidates(cands, ranked, *, api_key, ride_type, wind, target_km,
             if qual is not None:
                 c.good_gravel_frac, c.unrideable_frac = qual
         if fast_src is not None:
-            _set_fast(c, fast_src)
+            _set_traffic(c, fast_src)
         if corr_cache is not None:
             corr_cache.apply(c)
         engine.evaluate([c], wind, ride_type, target_km, tolerance_km,

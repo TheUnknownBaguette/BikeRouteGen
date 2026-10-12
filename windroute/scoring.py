@@ -225,6 +225,22 @@ W_POOR = 1.0
 FAST_FREE_FRAC = 0.02
 W_FAST = 1.0
 
+# Numbered-route penalties (owner, 2026-10-12): a route number marks a main road
+# whatever its speed limit. A stretch on one is charged here and NOT also as busy /
+# poor / fast, so each mile counts once, at its tier's rate:
+#   - US / Interstate routes: avoided everywhere, in town too. Steepest, and only
+#     a crossing-sized free band.
+#   - State routes outside town: same weight as a busy highway, small free band
+#     (a quarter-mile jog onto IL 47 is fine; two miles of it isn't).
+#   - State routes in town (posted <= 35 mph): "a little is okay" - a wider free
+#     band, then the poor-for-bikes weight.
+NATIONAL_FREE_FRAC = 0.01
+W_NATIONAL = 2.0
+STATE_FREE_FRAC = 0.02
+W_STATE = 1.5
+TOWN_STATE_FREE_FRAC = 0.05
+W_TOWN_STATE = 1.0
+
 # Road-ride gravel penalty (linear + convex). `unpaved_frac` upstream counts only
 # surface we have evidence for (unknown defaults to paved), so this punishes gravel
 # we're sure about. The quadratic term makes the penalty bite ever harder as a route
@@ -309,6 +325,12 @@ class RouteWeights:
     poor_free_frac: float = POOR_FREE_FRAC
     w_fast: float = W_FAST
     fast_free_frac: float = FAST_FREE_FRAC
+    w_national: float = W_NATIONAL
+    national_free_frac: float = NATIONAL_FREE_FRAC
+    w_state: float = W_STATE
+    state_free_frac: float = STATE_FREE_FRAC
+    w_town_state: float = W_TOWN_STATE
+    town_state_free_frac: float = TOWN_STATE_FREE_FRAC
     w_path: float = W_PATH
     path_run_free_frac: float = PATH_RUN_FREE_FRAC
     w_bikelane: float = W_BIKELANE
@@ -512,6 +534,10 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
         busy_penalty = -max(0.0, c.busy_frac - busy_baseline - w.busy_free_frac)
         poor_penalty = -max(0.0, c.poor_road_frac - w.poor_free_frac)
         fast_penalty = -max(0.0, c.fast_road_frac - w.fast_free_frac)
+        route_penalty = (
+            w.w_national * -max(0.0, c.national_route_frac - w.national_free_frac)
+            + w.w_state * -max(0.0, c.state_route_frac - w.state_free_frac)
+            + w.w_town_state * -max(0.0, c.town_state_route_frac - w.town_state_free_frac))
         # Penalize only the LONGEST contiguous path run beyond the connector band,
         # so trails used to link roads ride free but a long path stretch doesn't.
         path_penalty = -max(0.0, c.path_run_frac - w.path_run_free_frac)
@@ -525,10 +551,23 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
         c.total_score = ((w.w_wind * w.wind_scale * wind_norm) + surf_term
                          + (w.w_dist * dist_penalty) + (w.w_busy * busy_penalty)
                          + (w.w_poor * poor_penalty) + (w.w_fast * fast_penalty)
+                         + route_penalty
                          + (w.w_path * path_penalty) + (w.w_bikelane * lane_bonus)
                          + (w.w_tidy * tidy_penalty))
 
     return sorted(candidates, key=lambda c: c.total_score, reverse=True)
+
+
+def _route_bits(c: Candidate) -> list:
+    """'4% on US highways' / 'x% on state routes' notes beyond each free band."""
+    bits = []
+    if c.national_route_frac > NATIONAL_FREE_FRAC:
+        bits.append(f"{c.national_route_frac * 100:.0f}% on US highways")
+    state = c.state_route_frac + c.town_state_route_frac
+    if (c.state_route_frac > STATE_FREE_FRAC
+            or c.town_state_route_frac > TOWN_STATE_FREE_FRAC):
+        bits.append(f"{state * 100:.0f}% on state routes")
+    return bits
 
 
 def explain(best: Candidate, wind: Wind, ride_type: str) -> str:
@@ -551,9 +590,13 @@ def explain(best: Candidate, wind: Wind, ride_type: str) -> str:
     if best.unrideable_frac > 0:
         bits.append(f"{best.unrideable_frac * 100:.0f}% unrideable surface")
     if (best.busy_frac <= BUSY_FREE_FRAC and best.poor_road_frac <= POOR_FREE_FRAC
-            and best.fast_road_frac <= FAST_FREE_FRAC):
+            and best.fast_road_frac <= FAST_FREE_FRAC
+            and best.national_route_frac <= NATIONAL_FREE_FRAC
+            and best.state_route_frac <= STATE_FREE_FRAC
+            and best.town_state_route_frac <= TOWN_STATE_FREE_FRAC):
         bits.append("stays on quiet roads")
     else:
+        bits.extend(_route_bits(best))
         if best.busy_frac > BUSY_FREE_FRAC:
             bits.append(f"{best.busy_frac * 100:.0f}% on busy highways")
         if best.poor_road_frac > POOR_FREE_FRAC:
@@ -663,6 +706,8 @@ def _option_reasons(c: Candidate, wind: Wind, ride_type: str, lead: str = None):
         reasons.append(f"{c.unpaved_frac * 100:.0f}% known gravel")
     if c.unrideable_frac > 0:
         reasons.append(f"{c.unrideable_frac * 100:.0f}% unrideable surface (avoided)")
+    if lead != "quiet":
+        reasons.extend(_route_bits(c))
     if lead != "quiet" and c.busy_frac > BUSY_FREE_FRAC:
         reasons.append(f"{c.busy_frac * 100:.0f}% on busy highways")
     if lead != "quiet" and c.poor_road_frac > POOR_FREE_FRAC:
@@ -690,7 +735,7 @@ def _option_axes(have_lane: bool, target_km: float):
     axes = [
         ("wind", "Stronger wind line", lambda c: c.wind_score, 0.15),
         ("quiet", "Quieter roads",
-         lambda c: -(c.busy_frac + c.poor_road_frac + c.fast_road_frac
+         lambda c: -(c.traffic_frac
                      + 0.5 * max(0.0, c.path_run_frac - PATH_RUN_FREE_FRAC)),
          0.05),
     ]

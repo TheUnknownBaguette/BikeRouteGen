@@ -94,6 +94,11 @@ class Candidate:
                                 # isn't a State Road: the arterials busy_frac misses
     fast_road_frac: float = 0.0 # fraction on 45+ mph / 4+ lane roads (OSM maxspeed/lanes)
                                 # beyond busy_frac + poor_road_frac (0 if OSM unavailable)
+    national_route_frac: float = 0.0  # on US / Interstate (national) numbered routes (OSM ref)
+    state_route_frac: float = 0.0     # on state routes outside town (OSM ref)
+    town_state_route_frac: float = 0.0  # on state routes posted <= 35 mph (in town)
+                                # numbered-route stretches are charged ONLY here, not also
+                                # in busy / poor / fast (planner._set_traffic)
     path_frac: float = 0.0      # fraction on separated bike/foot paths (multiuse trails)
     path_run_frac: float = 0.0  # LONGEST contiguous path run as a fraction of the route
                                 # (the connector-vs-destination signal: a short run is a
@@ -120,6 +125,13 @@ class Candidate:
     surface_score: float = 0.0
     self_intersections: int = 0 # times the route crosses itself (tangle / messiness signal)
     total_score: float = 0.0
+
+    @property
+    def traffic_frac(self) -> float:
+        """Every share charged as traffic: busy + poor + fast + numbered routes."""
+        return (self.busy_frac + self.poor_road_frac + self.fast_road_frac
+                + self.national_route_frac + self.state_route_frac
+                + self.town_state_route_frac)
 
 
 @dataclass

@@ -306,4 +306,6 @@ class CorrectionCache:
             # a marked road is fully described by the mark (busy -> busy_frac above)
             candidate.poor_road_frac = candidate.poor_road_frac * uncorrected / total
             candidate.fast_road_frac = candidate.fast_road_frac * uncorrected / total
+            for f in ("national_route_frac", "state_route_frac", "town_state_route_frac"):
+                setattr(candidate, f, getattr(candidate, f) * uncorrected / total)
         return surf_d, traf_d

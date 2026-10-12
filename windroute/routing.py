@@ -210,7 +210,7 @@ def _ors_directions(api_key, profile, coordinates, timeout):
     # path_run_km uses the positional waytype values, so compute it from the raw
     # geometry BEFORE stripping stubs (which would shift the indices).
     path_run_km = _waytype_run_km(extras, coords, PATH_WAYTYPES)
-    names = _step_names(props, len(coords))
+    names = _with_road_class(_step_names(props, len(coords)), extras)
     poor = _poor_fraction(extras, coords)
     # Drop the little A->B->A spurs ORS sometimes emits; subtract their mileage
     # from the ORS road distance so the reported length matches the cleaned line.
@@ -335,6 +335,39 @@ def _step_names(props, n):
     if n >= 2:
         names[-1] = names[-2]
     return names
+
+
+class RoadName(str):
+    """A road name that also carries ORS's class for the stretch it names.
+
+    `waytype` / `suit` are the ORS waytype code and 0-10 bike suitability of the
+    stretch leaving that point (None when ORS sent none). Being a str, it rides
+    along with the coordinates through every splice, reversal and spur cut the
+    builders already do for the cue-sheet names, so the planner can later tell
+    which stretches the busy / poor / numbered-route checks each claim and charge
+    every stretch once.
+    """
+    __slots__ = ("waytype", "suit")
+
+    def __new__(cls, name, waytype=None, suit=None):
+        obj = super().__new__(cls, name)
+        obj.waytype, obj.suit = waytype, suit
+        return obj
+
+    def __reduce__(self):                          # keep the class info when pickled
+        return (RoadName, (str(self), self.waytype, self.suit))
+
+
+def _with_road_class(names, extras):
+    """`names` as RoadNames carrying each stretch's ORS waytype + suitability."""
+    nseg = len(names) - 1
+    if nseg < 1:
+        return names
+    wt = _segment_values(extras.get("waytype"), nseg) or [None] * nseg
+    suit = _segment_values(extras.get("suitability"), nseg) or [None] * nseg
+    out = [RoadName(n, wt[i], suit[i]) for i, n in enumerate(names[:-1])]
+    out.append(RoadName(names[-1], wt[-1], suit[-1]))  # the end repeats the stretch before
+    return out
 
 
 def _reversed_names(names):

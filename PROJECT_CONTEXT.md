@@ -366,6 +366,23 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   are fine on purpose. Scored `W_FAST=1.0` beyond 2%. Overpass failures leave it at
   0 with a planner note; `plan_routes(fast_roads=False)` skips it. Refine reuses the
   index; a "quiet" correction clears it.
+- **Numbered state / US routes** (Oct 2026, from the owner's Oct 11 Champaign ride, which
+  swapped 2 mi of IL 47 for a parallel county road): a route number means "main road"
+  whatever the speed limit. The fast-roads Overpass read also fetches trunk/primary/
+  secondary ways with a `ref`; `surface.route_tier` sorts them into `national` (US / I
+  routes; elsewhere trunk/primary), `state` (US state codes like IL 47, SR, M-, K-;
+  elsewhere secondary) and `town-state` (a state route posted <= 35 mph). County refs
+  (CR / CH) are skipped: OSM tags some quiet county roads secondary. ORS's "State Road"
+  waytype did NOT catch IL 47 (it came back as 0% busy). Scoring: US routes `W_NATIONAL=2.0`
+  beyond 1% (avoided in town too), state routes `W_STATE=1.5` beyond 2%, in-town state routes
+  `W_TOWN_STATE=1.0` beyond 5% ("a little is okay"). **Each stretch is charged once:**
+  `routing.RoadName` (a str subclass) carries ORS's waytype + suitability on every cue-sheet
+  name, so it survives splices/reversals/spur cuts, and `planner._set_traffic` puts each
+  stretch in one bucket: numbered route > busy State Road > poor (suit <= 5) > fast. This
+  per-stretch accounting also fixed the old fast share (total fast minus total busy/poor),
+  which under-counted: e.g. 2.3 mi of W Bradley Ave (45 mph) west of Champaign now counts as
+  fast. Candidate.traffic_frac sums every bucket for the "busy road" displays. Tests:
+  `tests/test_numbered_routes.py`.
 - **Plan speed** (Oct 2026): a slow plan was ~35 s, almost all of it waiting on outside
   services (Open-Meteo 17.8 s and Overpass 11.6 s in a bad moment; ORS ~4-5 s; our code
   ~0.5 s). Now: (1) the speed-limit lookup starts right after geocoding for the ride's

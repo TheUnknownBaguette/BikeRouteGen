@@ -13,6 +13,7 @@ so a front-end can fall back to the ORS baseline.
 from __future__ import annotations
 
 import math
+import re
 import threading
 import time
 
@@ -533,6 +534,54 @@ ROAD_HIGHWAYS = ("trunk", "trunk_link", "primary", "primary_link", "secondary",
                  "residential", "road")
 
 
+# Numbered routes (owner, 2026-10-12): a state or US route number says "main road"
+# whatever its speed limit — IL 47 at 55 mph got through as just another arterial.
+# Read from the OSM `ref` on trunk/primary/secondary ways. County numbers (CR 900E,
+# CH 1) are skipped: OSM tags some quiet county roads as secondary, and those are
+# the roads the owner rides. Outside the US the road class decides: trunk/primary
+# with a ref is a national route, secondary a regional (state-level) one.
+MAIN_HIGHWAYS = ("trunk", "trunk_link", "primary", "primary_link", "secondary",
+                 "secondary_link")
+TOWN_MAX_MPH = 35.0     # a state route posted at or below this is running through town
+_COUNTY_REF = re.compile(r"^(CR|CH|C\.R\.|CO\s*RD|COUNTY)\b", re.I)
+_NATIONAL_REF = re.compile(r"^(US|I)[\s-]*\d", re.I)            # US 150, I 57
+# US state routes: a state's postal code (IL 47, CO 7) or the generic SR / SH /
+# Michigan M- / Kansas K- forms. Other countries' refs fall back to road class.
+_US_STATES = ("AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN "
+              "MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA "
+              "WA WV WI WY DC SR SH M K").split()
+_STATE_REF = re.compile(r"^(%s)[\s-]*\d+[A-Z]?$" % "|".join(_US_STATES), re.I)
+
+
+def route_tier(tags: dict) -> str | None:
+    """'national' (US / Interstate), 'state', 'town-state' (a state route posted
+    <= TOWN_MAX_MPH) or None, from a way's OSM tags. The strongest of its refs wins."""
+    hw = tags.get("highway") or ""
+    if hw not in MAIN_HIGHWAYS:
+        return None
+    tier = None
+    for ref in str(tags.get("ref") or "").split(";"):
+        ref = ref.strip()
+        if not ref or _COUNTY_REF.match(ref):
+            continue
+        if _NATIONAL_REF.match(ref):
+            return "national"
+        if _STATE_REF.match(ref):
+            tier = "state"
+        elif hw.startswith(("trunk", "primary")):
+            return "national"
+        else:
+            tier = "state"
+    if tier == "state":
+        mph = maxspeed_mph(tags.get("maxspeed"))
+        if mph is not None and mph <= TOWN_MAX_MPH:
+            return "town-state"
+    return tier
+
+
+TIER_RANK = {None: 0, "town-state": 1, "state": 2, "national": 3}
+
+
 def maxspeed_mph(value) -> float | None:
     """'55 mph' -> 55, '80' (km/h, the OSM default unit) -> 49.7, else None."""
     import re
@@ -567,12 +616,14 @@ def _road_keys(tags: dict) -> set:
 
 
 class FastRoads:
-    """Index of fast / multi-lane roads around some routes, from one Overpass query.
+    """Index of fast / multi-lane roads and numbered (state / US) routes around some
+    routes, from one Overpass query.
 
-    `fraction(coords, names)` is the share of a route ridden ON such roads. A route
-    stretch counts only when it's within `match_m` of one AND the route's road name
-    (from ORS) matches the OSM name or ref, so a side path beside a fast road (common
-    in suburbs) doesn't count as riding the road.
+    `fraction(coords, names)` is the share of a route ridden ON fast roads;
+    `kind(p, name)` says whether a stretch is on a fast road and which numbered-route
+    tier it's on. A route stretch counts only when it's within `match_m` of the road
+    AND the route's road name (from ORS) matches the OSM name or ref, so a side path
+    beside the road (common in suburbs) doesn't count as riding it.
     """
 
     def __init__(self, match_m=15.0, cell_deg=0.003):
@@ -601,14 +652,18 @@ class FastRoads:
         self.bbox = (s, w, n, e)
         bb = f"({s},{w},{n},{e})"
         hw = "|".join(ROAD_HIGHWAYS)
-        # server-side prefilter (numbers >= 40, 4+ lanes); exact test in is_fast_road
+        main = "|".join(MAIN_HIGHWAYS)
+        # server-side prefilter (numbers >= 40, 4+ lanes, numbered main roads); the
+        # exact tests are is_fast_road / route_tier
         query = (f"[out:json][timeout:{timeout}];("
                  f'way["highway"~"^({hw})$"]["maxspeed"~"^([4-9][0-9]|1[0-9][0-9])"]{bb};'
-                 f'way["highway"~"^({hw})$"]["lanes"~"^([4-9]|1[0-9])"]{bb};);'
+                 f'way["highway"~"^({hw})$"]["lanes"~"^([4-9]|1[0-9])"]{bb};'
+                 f'way["highway"~"^({main})$"]["ref"]{bb};);'
                  f"out tags geom;")
         for el in overpass_json(query, timeout, deadline_s=deadline_s):
             tags = el.get("tags", {})
-            if not is_fast_road(tags):
+            fast, tier = is_fast_road(tags), route_tier(tags)
+            if not fast and tier is None:
                 continue
             keys = _road_keys(tags)
             if not keys:
@@ -616,22 +671,30 @@ class FastRoads:
             geom = [(g["lat"], g["lon"]) for g in el.get("geometry") or []]
             for a, b in zip(geom, geom[1:]):
                 for cell in {self._cell(*a), self._cell(*b)}:
-                    self._grid.setdefault(cell, []).append((a, b, keys))
+                    self._grid.setdefault(cell, []).append((a, b, keys, fast, tier))
             self.way_count += 1
         return self
 
-    def _on_fast(self, p, name):
+    def kind(self, p, name):
+        """(on a fast road?, numbered-route tier or None) for the stretch at point p
+        whose ORS road name is `name`."""
         name = (name or "").lower()
         if not name:
-            return False
+            return False, None
+        fast, tier = False, None
         ci, cj = self._cell(*p)
         for di in (-1, 0, 1):
             for dj in (-1, 0, 1):
-                for a, b, keys in self._grid.get((ci + di, cj + dj), ()):
+                for a, b, keys, f, t in self._grid.get((ci + di, cj + dj), ()):
                     if (_pt_seg_dist_m(p, a, b) <= self.match_m
                             and any(k in name for k in keys)):
-                        return True
-        return False
+                        fast = fast or f
+                        if TIER_RANK[t] > TIER_RANK[tier]:
+                            tier = t
+        return fast, tier
+
+    def _on_fast(self, p, name):
+        return self.kind(p, name)[0]
 
     def fraction(self, coords, names) -> float:
         if len(coords) < 2:
