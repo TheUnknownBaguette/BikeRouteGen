@@ -182,6 +182,25 @@ def suggest():
     return resp
 
 
+@app.route("/prefetch", methods=["POST"])
+def prefetch():
+    """Warm the road lookup (speed limits, route numbers, bike markings) for the
+    area the plan form is showing, so a plan doesn't wait on OpenStreetMap. Fire
+    and forget; the shared cache + in-flight joining keep repeats cheap."""
+    data = request.get_json(silent=True) or {}
+    try:
+        lat, lng = float(data["lat"]), float(data["lng"])
+        km = _clamp(data.get("km", 48), 1, 320, 48)
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"ok": False}), 400
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return jsonify({"ok": False}), 400
+    if _rate_limited("prefetch:" + _client_ip()):
+        return jsonify({"ok": False}), 429
+    planner.prefetch_area(lat, lng, km)
+    return jsonify({"ok": True}), 202
+
+
 def _form_near(f):
     """(lat, lng) of the area on the form's map when Plan was pressed, or None."""
     try:

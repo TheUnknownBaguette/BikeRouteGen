@@ -401,6 +401,24 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   "% bike lane / sharrows"; the compare table has a Turns column. Re-rank check: top picks
   unchanged in Champaign/Mokena/Naperville; less-turny routes climb (Mokena 0.8/mi rectangle
   #4 -> #2). Tests: `tests/test_turns_and_markings.py`.
+- **Reliable road lookup** (Oct 2026). Speed limits, route numbers and bike markings all
+  come from ONE background Overpass read, so it must land. On 2026-10-12 every mirror
+  504'd it. Fixes: (1) **declare a small budget**: Overpass admits queries by the
+  time/memory they DECLARE, default 512 MB; the road query now sends `[timeout:12]
+  [maxsize:32 MB]` (`FAST_QUERY_S`, `FAST_MAXSIZE`; answer is ~1.2 MB) and went from 504s to
+  accepted in ~2 s every time. (2) `overpass_json` treats a 200 with a "runtime error"
+  remark as a failure (`OverpassIncomplete`) - it used to return the partial/empty list and
+  the cache kept it for 24 h. (3) Mirror health: a mirror that failed goes last for 10 min
+  (`MIRROR_COOLDOWN_S`). (4) `hedge_s` (road read only, `FAST_HEDGE_S=6`): no answer yet ->
+  also ask the next mirror, first answer wins; heavy optional reads stay one at a time.
+  (5) `cached_fast_roads` joins a lookup already running for the area. (6) **Prefetch**:
+  the plan form POSTs `/prefetch` (lat, lng, km; per-IP rate limit) when the map area /
+  picked start / distance settles (`app.js`, `wr:moved` from `map.js`), so the read is
+  usually done or in flight before Plan is pressed. Live: Champaign plan 5.6 s WITH road
+  data, after the same plan earlier ran without it. Not done: the zone / region / OSM
+  surface reads still declare the default memory - add a maxsize there if they 504 too.
+  Render's free tier forgets the in-memory cache when it sleeps, which prefetch offsets.
+  Tests: `tests/test_overpass_reliability.py`.
 - **Plan speed** (Oct 2026): a slow plan was ~35 s, almost all of it waiting on outside
   services (Open-Meteo 17.8 s and Overpass 11.6 s in a bad moment; ORS ~4-5 s; our code
   ~0.5 s). Now: (1) the speed-limit lookup starts right after geocoding for the ride's

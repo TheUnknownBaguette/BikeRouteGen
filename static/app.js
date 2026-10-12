@@ -306,3 +306,40 @@ function wrPicked(lat, lng, label) {
 
   input.addEventListener('blur', function () { setTimeout(close, 120); });
 })();
+
+// Warm the road lookup (speed limits, route numbers, bike markings) for the ride
+// being set up, so pressing Plan doesn't wait on OpenStreetMap: the server starts
+// it in the background and a plan joins it or finds it cached. Fired for the
+// picked start (or the map's area once zoomed in to town level) and the distance,
+// at most once per ~5 km area / ~5 mi distance step, after things settle.
+(function () {
+  var dist = document.getElementById('distance');
+  if (!dist || !window.fetch) return;
+  var pLat = document.getElementById('picked_lat'), pLng = document.getElementById('picked_lng');
+  var timer = null, last = '';
+  function where() {
+    var lat = parseFloat(pLat && pLat.value), lng = parseFloat(pLng && pLng.value);
+    if (isFinite(lat) && isFinite(lng)) return { lat: lat, lng: lng };
+    var zoom = window.wrMapZoom && window.wrMapZoom();
+    var c = window.wrMapCenter && window.wrMapCenter();
+    return (c && zoom >= 10) ? { lat: c.lat, lng: c.lng } : null;
+  }
+  function send() {
+    var p = where(), d = parseFloat(dist.value);
+    if (!p || !(d > 0)) return;
+    var unit = document.querySelector('input[name="unit"]:checked');
+    var km = d * (unit && unit.value === 'km' ? 1 : 1.609344);
+    var key = (p.lat / 0.05).toFixed(0) + ',' + (p.lng / 0.05).toFixed(0) + ',' + Math.round(km / 8);
+    if (key === last) return;
+    last = key;
+    fetch('/prefetch', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                         body: JSON.stringify({ lat: p.lat, lng: p.lng, km: km }) })
+      .catch(function () {});
+  }
+  function soon() { clearTimeout(timer); timer = setTimeout(send, 900); }
+  window.addEventListener('wr:moved', soon);
+  window.addEventListener('wr:picked', soon);
+  dist.addEventListener('change', soon);
+  document.querySelectorAll('input[name="unit"]').forEach(function (r) { r.addEventListener('change', soon); });
+  document.querySelectorAll('.chip[data-dist]').forEach(function (c) { c.addEventListener('click', soon); });
+})();

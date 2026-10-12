@@ -413,6 +413,17 @@ def _start_fast_roads(lat, lng, target_km):
                               target_km * FAST_REACH_FRAC + 1.0)
 
 
+def prefetch_area(lat, lng, target_km):
+    """Start the road lookup for a ride from (lat, lng) before Plan is pressed.
+
+    The plan form calls this (via /prefetch) when the start or distance changes, so
+    the slow OSM read is usually cached - or already running, which a plan then
+    joins - by the time the rider plans. Fire and forget: failures are ignored."""
+    job = _start_fast_roads(lat, lng, target_km)
+    job.add_done_callback(lambda f: f.exception())       # read it so it isn't logged
+    return job
+
+
 def _apply_fast_roads(cands, job=None):
     """Charge each candidate's traffic from the OSM lookup. Returns (note, src).
 

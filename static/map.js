@@ -103,8 +103,14 @@
   // ======================================================== plan form
   function planForm() {
     var map = makeMap("topright");
-    // the location field biases its suggestions toward the area on the map
+    // the location field biases its suggestions toward the area on the map, and
+    // the form warms the road lookup for it (app.js listens for wr:moved)
     window.wrMapCenter = function () { return map.getCenter(); };
+    window.wrMapZoom = function () { return map.getZoom(); };
+    function moved() {
+      try { window.dispatchEvent(new CustomEvent("wr:moved")); } catch (e) {}
+    }
+    map.on("moveend", moved);
     var marker = null;
     var tip = document.getElementById("map-tip");
     var loc = document.getElementById("location");
@@ -123,6 +129,7 @@
     if (isFinite(lat0) && isFinite(lng0)) { map.setView([lat0, lng0], 12); setStart(lat0, lng0); }
     else if (last && isFinite(last.lat)) map.setView([last.lat, last.lng], 11);
     else map.setView([39.5, -96], 4);                    // continental US
+    moved();                                             // the opening view counts too
 
     map.on("click", function (e) {
       var lat = e.latlng.lat, lng = e.latlng.lng;

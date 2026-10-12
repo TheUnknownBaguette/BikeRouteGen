@@ -12,6 +12,7 @@ so a front-end can fall back to the ORS baseline.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import math
 import re
 import threading
@@ -34,35 +35,111 @@ OVERPASS_MIRRORS = (
 )
 
 
-def overpass_json(query, timeout=90, url=None, deadline_s=None):
-    """POST an Overpass query, trying mirrors in order until one answers.
+# Mirror health: a mirror that just failed or timed out goes to the back of the line
+# for a while, so the next read doesn't spend its whole budget waiting on it again
+# (overpass.kumi.systems timed out on every read for most of 2026-10-12).
+MIRROR_COOLDOWN_S = 600
+_mirror_failed: dict = {}                 # url -> time.monotonic() of its last failure
+_mirror_lock = threading.Lock()
+_overpass_pool = concurrent.futures.ThreadPoolExecutor(max_workers=12)
+
+
+class OverpassIncomplete(ValueError):
+    """Overpass answered 200 but says the query didn't finish (a server-side
+    timeout or out-of-memory "runtime error" remark). The elements are partial or
+    missing, so this is a failure, not an empty result: never cache it."""
+
+
+def _mirror_order(url=None):
+    """Mirrors to try: `url` first if given, then the rest; recently failed last."""
+    urls = [url] + [m for m in OVERPASS_MIRRORS if m != url] if url else list(OVERPASS_MIRRORS)
+    now = time.monotonic()
+    with _mirror_lock:
+        sick = {u for u, t in _mirror_failed.items() if now - t < MIRROR_COOLDOWN_S}
+    return sorted(urls, key=lambda u: u in sick)          # stable: healthy ones first
+
+
+def _mark_mirror(url, ok):
+    with _mirror_lock:
+        if ok:
+            _mirror_failed.pop(url, None)
+        else:
+            _mirror_failed[url] = time.monotonic()
+
+
+def _post_overpass(url, query, wait):
+    resp = requests.post(url, data={"data": query}, timeout=wait,
+                         headers={"User-Agent": USER_AGENT})
+    resp.raise_for_status()
+    data = resp.json()
+    remark = str(data.get("remark") or "")
+    if "runtime error" in remark.lower():
+        raise OverpassIncomplete(remark.strip()[:200])
+    return data.get("elements", [])
+
+
+def overpass_json(query, timeout=90, url=None, deadline_s=None, hedge_s=None):
+    """POST an Overpass query, trying mirrors until one answers.
 
     Returns the parsed ``elements`` list. If `url` is given it's tried first (then
-    the other mirrors as fallback); otherwise all mirrors are tried in order.
-    Raises the last error only if EVERY endpoint fails, so a single 504 / timeout
-    no longer kills a read. `deadline_s` caps the total time across mirrors (for
-    optional reads that must not hold up a plan).
+    the other mirrors as fallback); otherwise all mirrors are tried, healthy ones
+    first. Raises the last error only if EVERY endpoint fails, so a single 504 /
+    timeout no longer kills a read. `deadline_s` caps the total time across mirrors
+    (for optional reads that must not hold up a plan).
+
+    `hedge_s`: when a mirror hasn't answered after this many seconds, ALSO ask the
+    next one and take whichever answers first. Only for small reads a plan waits
+    on; heavy optional reads leave it None (one mirror at a time) so we don't
+    double the load we put on these free, shared servers.
     """
-    if url:
-        urls = [url] + [m for m in OVERPASS_MIRRORS if m != url]
-    else:
-        urls = list(OVERPASS_MIRRORS)
-    last_exc = None
+    urls = _mirror_order(url)
     start = time.monotonic()
-    for u in urls:
+    pending: dict = {}                    # future -> url
+    last_exc = None
+    nxt = 0
+    launch = True                         # start the next mirror on this pass?
+
+    def budget():
         wait = timeout + 15
         if deadline_s is not None:
             wait = min(wait, deadline_s - (time.monotonic() - start))
-            if wait <= 1:
-                break
-        try:
-            resp = requests.post(u, data={"data": query}, timeout=wait,
-                                 headers={"User-Agent": USER_AGENT})
-            resp.raise_for_status()
-            return resp.json().get("elements", [])
-        except (requests.RequestException, ValueError) as exc:
-            last_exc = exc
-            continue
+        return wait
+
+    while True:
+        if launch and nxt < len(urls):
+            wait = budget()
+            if wait > 1:
+                pending[_overpass_pool.submit(_post_overpass, urls[nxt], query, wait)] = urls[nxt]
+                nxt += 1
+            else:
+                nxt = len(urls)           # out of time: don't start any more
+        if not pending:
+            break
+        more = nxt < len(urls)
+        limit = budget() if deadline_s is not None else None
+        if hedge_s is not None and more:
+            limit = hedge_s if limit is None else min(limit, hedge_s)
+        done, _ = concurrent.futures.wait(pending, timeout=limit,
+                                          return_when=concurrent.futures.FIRST_COMPLETED)
+        launch = hedge_s is not None      # nothing back in time: hedge onto the next
+        for fut in done:
+            u = pending.pop(fut)
+            try:
+                elements = fut.result()
+            except (requests.RequestException, ValueError) as exc:
+                _mark_mirror(u, ok=False)
+                last_exc, launch = exc, True
+                continue
+            _mark_mirror(u, ok=True)
+            return elements
+        if not done and deadline_s is not None and budget() <= 1:
+            break                         # past the deadline; leave the stragglers
+        if not done and hedge_s is None:
+            break                         # sequential read ran out of time
+    for u in pending.values():            # still out when time ran out
+        _mark_mirror(u, ok=False)
+    if last_exc is None and pending:
+        last_exc = requests.Timeout("Overpass didn't answer before the deadline")
     raise last_exc if last_exc else RuntimeError("no Overpass endpoint available")
 
 # OSM surface values -> paved / unpaved. Unknown or untagged is treated as
@@ -636,6 +713,16 @@ RoadKind = namedtuple("RoadKind", "fast tier lane sharrow main",
                       defaults=(False, None, False, False, False))
 
 
+# The road lookup a plan waits on. Overpass admits a query by the time and memory
+# it DECLARES, and the default declaration is 512 MB: on a busy day (2026-10-12) that
+# got 504 "too busy" from every mirror, while the same query declaring 32 MB (the
+# answer is ~1-2 MB) was let in and answered in ~2 s every time. A short declared
+# time limit helps admission the same way. Hedge onto a second mirror when one is slow.
+FAST_QUERY_S = 12
+FAST_MAXSIZE = 32 * 1024 * 1024
+FAST_HEDGE_S = 6.0
+
+
 class FastRoads:
     """Index of fast / multi-lane roads and numbered (state / US) routes around some
     routes, from one Overpass query.
@@ -657,7 +744,7 @@ class FastRoads:
     def _cell(self, lat, lng):
         return (int(lat // self.cell_deg), int(lng // self.cell_deg))
 
-    def build(self, coords_lists, timeout=12, deadline_s=30):
+    def build(self, coords_lists, timeout=FAST_QUERY_S, deadline_s=30):
         pts = [p for coords in coords_lists for p in coords]
         if not pts:
             return self
@@ -669,7 +756,7 @@ class FastRoads:
         s, w, n, e = self.bbox
         return all(s <= lat <= n and w <= lng <= e for lat, lng in coords)
 
-    def build_bbox(self, s, w, n, e, timeout=12, deadline_s=30):
+    def build_bbox(self, s, w, n, e, timeout=FAST_QUERY_S, deadline_s=30):
         self.bbox = (s, w, n, e)
         bb = f"({s},{w},{n},{e})"
         hw = "|".join(ROAD_HIGHWAYS)
@@ -677,13 +764,13 @@ class FastRoads:
         marks = "|".join(PAINTED_LANE_VALUES + SHARROW_VALUES)
         # server-side prefilter (numbers >= 40, 4+ lanes, numbered main roads); the
         # exact tests are is_fast_road / route_tier
-        query = (f"[out:json][timeout:{timeout}];("
+        query = (f"[out:json][timeout:{timeout}][maxsize:{FAST_MAXSIZE}];("
                  f'way["highway"~"^({hw})$"]["maxspeed"~"^([4-9][0-9]|1[0-9][0-9])"]{bb};'
                  f'way["highway"~"^({hw})$"]["lanes"~"^([4-9]|1[0-9])"]{bb};'
                  f'way["highway"~"^({main})$"]["ref"]{bb};'
                  f'way["highway"~"^({hw})$"][~"^cycleway(:both|:left|:right)?$"~"^({marks})$"]{bb};);'
                  f"out tags geom;")
-        for el in overpass_json(query, timeout, deadline_s=deadline_s):
+        for el in overpass_json(query, timeout, deadline_s=deadline_s, hedge_s=FAST_HEDGE_S):
             tags = el.get("tags", {})
             fast, tier = is_fast_road(tags), route_tier(tags)
             lane, sharrow = bike_markings(tags)
@@ -745,30 +832,54 @@ FAST_CACHE_TTL_S = 24 * 3600
 FAST_CACHE_MAX = 16
 FAST_SNAP_DEG = 0.05
 _fast_cache: list = []                        # [(stored_at, FastRoads)], newest last
+_fast_inflight: list = []                     # [(box, Future)] lookups running now
 _fast_lock = threading.Lock()
 
 
 def clear_fast_cache():
     with _fast_lock:
         _fast_cache.clear()
+        _fast_inflight.clear()
+
+
+def _covers(box, s, w, n, e):
+    bs, bw, bn, be = box
+    return bs <= s and bw <= w and bn >= n and be >= e
 
 
 def cached_fast_roads(s, w, n, e, deadline_s=30) -> FastRoads:
-    """A FastRoads index covering the box, from the cache or one Overpass read."""
+    """A FastRoads index covering the box, from the cache or one Overpass read.
+
+    If a lookup covering the box is already running (the plan form's prefetch, or
+    another plan nearby) this waits for it instead of sending the same query again.
+    """
     now = time.monotonic()
-    with _fast_lock:
-        _fast_cache[:] = [(t, src) for t, src in _fast_cache if now - t < FAST_CACHE_TTL_S]
-        for t, src in reversed(_fast_cache):
-            bs, bw, bn, be = src.bbox
-            if bs <= s and bw <= w and bn >= n and be >= e:
-                return src
     snap = FAST_SNAP_DEG
     box = (math.floor(s / snap) * snap, math.floor(w / snap) * snap,
            math.ceil(n / snap) * snap, math.ceil(e / snap) * snap)
-    src = FastRoads().build_bbox(*box, deadline_s=deadline_s)
+    with _fast_lock:
+        _fast_cache[:] = [(t, src) for t, src in _fast_cache if now - t < FAST_CACHE_TTL_S]
+        for t, src in reversed(_fast_cache):
+            if _covers(src.bbox, s, w, n, e):
+                return src
+        running = next((f for b, f in _fast_inflight if _covers(b, s, w, n, e)), None)
+        if running is None:
+            mine = concurrent.futures.Future()
+            _fast_inflight.append((box, mine))
+    if running is not None:
+        return running.result(timeout=deadline_s)
+    try:
+        src = FastRoads().build_bbox(*box, deadline_s=deadline_s)
+    except BaseException as exc:
+        mine.set_exception(exc)
+        raise
+    finally:
+        with _fast_lock:
+            _fast_inflight[:] = [(b, f) for b, f in _fast_inflight if f is not mine]
     with _fast_lock:
         _fast_cache.append((time.monotonic(), src))
         del _fast_cache[:-FAST_CACHE_MAX]
+    mine.set_result(src)
     return src
 
 
