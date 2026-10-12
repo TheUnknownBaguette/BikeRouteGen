@@ -342,6 +342,13 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
   preserved), and a **tidiness penalty** (`W_TIDY=0.4`, free band 0.10 self-crossings/km
   via `_self_intersections`) demotes any tangled candidate so the cleanest seed wins
   (`Cross` column in the table). `--candidates` default 12 (more seeds to pick from).
+  **Crossings vs touches (Oct 2026):** `_self_intersections` used to count every point two
+  passes SHARE as a crossing (a recorded out-and-back stem read 11; it has 1). Now: open
+  crossings must strictly split each other, and where passes meet (one shared point or a
+  shared stretch) it counts only if the second pass comes in on one side of the first and
+  leaves on the other (`geometry._side_of`). Re-check on 21 real routes: no real crossing
+  lost; the dropped ones were touches, a return merging onto the outbound road, and a
+  duplicated point. Tests: `tests/test_self_crossings.py`.
 - **Surface sources** (`--surface-source ors|osm|both`): ORS buckets (baseline, free),
   OSM/Overpass tags (finer for gravel), or `both` (cross-check, flags disagreements
   >10%). Road rides show "Gravel %" (= confirmed unpaved); gravel rides show "Unpaved %".

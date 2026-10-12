@@ -25,15 +25,21 @@ def _polyline_km(coords):
 
 
 def _self_intersections(coords):
-    """Count times a route crosses itself (non-adjacent segment pairs that
-    intersect). A clean loop or rectangle scores 0; a tangled round_trip loop -
-    where ORS scattered via-points that cross-connect - scores high (verified:
-    clean rectangle 0, messy lollipop 67).
+    """Count times a route crosses itself. A clean loop or rectangle scores 0; a
+    tangled round_trip loop - where ORS scattered via-points that cross-connect -
+    scores high (verified: clean rectangle 0, messy lollipop 67).
 
-    A deliberate retrace (the out leg + reversed out leg of an out-and-back, or a
-    lollipop stem) is an exact COLLINEAR overlap, not a crossing, so it scores 0
-    here - this messiness signal doesn't unfairly punish retraced shapes. O(n^2)
-    with a bounding-box quick-reject, which is plenty fast at our point counts.
+    Two kinds of crossing are counted:
+      - two non-adjacent segments crossing in the open (each strictly splits the
+        other's endpoints);
+      - the route passing twice through the SAME point (a road intersection is a
+        node on both passes) and the second pass going from one side of the first
+        to the other.
+    Merely touching is NOT a crossing: riding back along the same road (an
+    out-and-back, a lollipop stem) shares points with the way out without crossing
+    it, and used to count once per shared point (an Oct 2026 recorded ride's
+    out-and-back stem read as 11 crossings; it has 1). O(n^2) with a bounding-box
+    quick-reject, which is plenty fast at our point counts.
     """
     pts = coords
     m = len(pts) - 1
@@ -65,9 +71,59 @@ def _self_intersections(coords):
             d2 = ccw(pts[j], pts[j + 1], pts[i + 1])
             d3 = ccw(pts[i], pts[i + 1], pts[j])
             d4 = ccw(pts[i], pts[i + 1], pts[j + 1])
-            if (d1 > 0) != (d2 > 0) and (d3 > 0) != (d4 > 0):
+            if d1 * d2 < 0 and d3 * d4 < 0:            # strictly through each other
+                count += 1
+
+    # Crossings where the passes MEET (the strict test above sees those as touches):
+    # follow each stretch the route rides twice - one shared point (an intersection)
+    # or a run of them (a shared bit of road) - and count it when the second pass
+    # comes in on one side of the first and leaves on the other.
+    at: dict = {}
+    for k, p in enumerate(pts):
+        at.setdefault((round(p[0], 7), round(p[1], 7)), []).append(k)
+    used = set()
+    for j in range(1, m):
+        for i in at[(round(pts[j][0], 7), round(pts[j][1], 7))]:
+            if i > j - 2 or i == 0 or (j, i) in used:
+                continue
+            step = (1 if pts[i + 1] == pts[j + 1]
+                    else -1 if pts[i - 1] == pts[j + 1] else 0)
+            j_end, i_end = j, i                        # follow the shared run forward
+            while (step and 0 < i_end + step < m and j_end + 1 < m
+                   and i_end + step < j_end and pts[i_end + step] == pts[j_end + 1]):
+                j_end, i_end = j_end + 1, i_end + step
+                used.add((j_end, i_end))
+            side_in = _side_of(pts, i, pts[j - 1])
+            side_out = _side_of(pts, i_end, pts[j_end + 1])
+            if side_in is not None and side_out is not None and side_in != side_out:
                 count += 1
     return count
+
+
+_OVERLAP_RAD = math.radians(1.0)    # directions this close = along the road, no side
+
+
+def _side_of(pts, i, q):
+    """Which side (True/False) of the route through pts[i] the point q is on, or
+    None when q lies along the route there (no side) or i is an end of the route.
+    The side is consistent for a given direction of travel: the sector swept going
+    counter-clockwise from the way in to the way out."""
+    v = pts[i]
+
+    def away(n, step):                                 # nearest neighbour not at v
+        while 0 <= n < len(pts) and pts[n] == v:
+            n += step
+        return pts[n] if 0 <= n < len(pts) else None
+
+    a, b = away(i - 1, -1), away(i + 1, 1)
+    if a is None or b is None or q == v:
+        return None
+    k = math.cos(math.radians(v[0]))
+    a_in, a_out, t = (math.atan2(p[0] - v[0], (p[1] - v[1]) * k) for p in (a, b, q))
+    for u in (a_in, a_out):
+        if abs((t - u + math.pi) % (2 * math.pi) - math.pi) < _OVERLAP_RAD:
+            return None
+    return ((t - a_in) % (2 * math.pi)) < ((a_out - a_in) % (2 * math.pi))
 
 
 # --------------------------------------------------------------------------- #
