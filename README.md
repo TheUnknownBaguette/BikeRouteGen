@@ -177,6 +177,23 @@ configuration — it's on by default.
 > not a public launch. Free hosts also sleep after idle, so the first request after
 > a quiet spell can take ~a minute to wake.
 
+### A club version (club mode)
+
+The same app can run as a site for a cycling club: riders pick one of the club's start
+points instead of typing an address, and routes strongly prefer the roads the club
+already rides out of town. Everything else (wind, traffic, surface scoring) is the
+same planner, so improvements reach both sites.
+
+1. Put the club's rides (GPX or TCX) in `club/routes/` and edit `club/club.json`
+   (club name, start points with `lat`/`lng`, and `club_road_weight`).
+2. Build the club's roads and exits: `python -m windroute.cli club-build`. It writes
+   `club/club_data.json` and prints the exits it found; set an exit's `enabled` or
+   `home_only` there to change how it's used, and re-run after adding rides.
+3. Host it as a second service from the same repo with `CLUB_CONFIG=club/club.json`
+   (and its own `ORS_API_KEY`, so the club's plans use their own daily quota).
+
+The raw ride files stay out of git (`.gitignore`); only `club_data.json` is needed to run.
+
 ### Self-hosting later (your own box)
 
 When you have your own server, run the exact same command there — `waitress` is

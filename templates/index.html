@@ -5,12 +5,35 @@
 {% endblock %}
 
 {% block panel %}
+  {% if club %}
+  <h1 class="title">Plan a club ride</h1>
+  <p class="lede">{{ club.name }}: leave town on the club's roads, then ride the wind &mdash; into it while you're fresh, home with it at your back.</p>
+  {% else %}
   <h1 class="title">Plan a ride</h1>
   <p class="lede">Routes that read the forecast: into the wind while you're fresh, home with it at your back.</p>
+  {% endif %}
 
   {% if error %}<div class="err" role="alert">Couldn&rsquo;t plan that one: {{ error }}</div>{% endif %}
 
   <form method="post" action="/plan" id="planform">
+    {% if club %}
+    {% set cs = club.start(d.club_start) or club.starts[0] %}
+    <div class="field">
+      <span class="label">Start</span>
+      <div class="seg" role="group" aria-label="Club start">
+        {% for s in club.starts %}
+        <label class="seg-opt"><input type="radio" name="club_start" value="{{ s.id }}"
+          data-lat="{{ s.lat }}" data-lng="{{ s.lng }}" data-address="{{ s.address }}"
+          {{ 'checked' if s.id == cs.id }}><span>{{ s.short or s.name }}</span></label>
+        {% endfor %}
+      </div>
+      <p class="hint" id="club-address">{{ cs.address }}</p>
+      <input type="hidden" name="picked_lat" id="picked_lat" value="{{ cs.lat }}">
+      <input type="hidden" name="picked_lng" id="picked_lng" value="{{ cs.lng }}">
+      <input type="hidden" name="near_lat" id="near_lat">
+      <input type="hidden" name="near_lng" id="near_lng">
+    </div>
+    {% else %}
     <div class="field">
       <label for="location">Start</label>
       <div class="ac field-ic">
@@ -28,6 +51,7 @@
       </div>
       <p class="hint">Or click the map to drop your start exactly where you'll roll out.</p>
     </div>
+    {% endif %}
 
     <div class="row">
       <div class="field">
@@ -114,6 +138,7 @@
               {% endfor %}
             </select>
           </div>
+          {% if not club %}
           <div class="field">
             <label for="ride_area">Ride-area staging
               <span class="help left" tabindex="0"
@@ -121,6 +146,7 @@
                     data-tip="Optionally ride somewhere quieter first. Blank starts right here; auto finds the nearest quiet countryside; a direction like south heads that way; or name a place to aim for.">i</span></label>
             <input type="text" id="ride_area" name="ride_area" value="{{ d.ride_area }}" placeholder="auto · S · a place">
           </div>
+          {% endif %}
         </div>
 
         <div class="row">
@@ -169,10 +195,12 @@
 {% endblock %}
 
 {% block stage %}
+  {% if not club %}
   <div class="overlay glass map-tip" id="map-tip">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6-7-11a7 7 0 0 1 14 0c0 5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
     Click the map to set your start
   </div>
+  {% endif %}
   <div class="overlay loading" id="loading" hidden>
     <div class="glass box" role="status" aria-live="polite">
       <div class="spinner" aria-hidden="true"></div>

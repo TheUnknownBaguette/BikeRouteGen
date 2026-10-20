@@ -28,6 +28,7 @@ from urllib.parse import urlencode
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from windroute import engine, render, planner, rwgps, cues
+from windroute import club as clubmod
 
 app = Flask(__name__)
 # Cache-buster for our own CSS/JS: changes on every (re)start, i.e. every deploy, so
@@ -35,6 +36,14 @@ app = Flask(__name__)
 app.jinja_env.globals["asset_v"] = str(int(time.time()))
 # Reject oversized request bodies outright — the form is tiny.
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024
+
+# Club mode: CLUB_CONFIG points at a club's club.json (e.g. club/club.json). The
+# form then offers the club's start points instead of an address search, and plans
+# prefer the club's roads out of town (windroute/club.py). Unset = the normal site.
+_club_cfg = os.environ.get("CLUB_CONFIG", "").strip()
+CLUB = (clubmod.load(_club_cfg if os.path.isabs(_club_cfg)
+                     else Path(__file__).parent / _club_cfg) if _club_cfg else None)
+app.jinja_env.globals["club"] = CLUB
 
 OUT_DIR = Path(__file__).parent / "static" / "out"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -147,6 +156,7 @@ FORM_DEFAULTS = {
     "ride_type": "road", "speed": "17", "shapes": ["loop", "lollipop", "rectangle"],
     "surface_source": "ors", "ride_area": "", "tolerance": "3",
     "candidates": "12", "corrections": True, "classify": False, "refine": False,
+    "club_start": "",
 }
 ALL_SHAPES = ["loop", "lollipop", "rectangle", "out-and-back"]
 RIDE_TYPES = ("road", "gravel")
@@ -276,6 +286,11 @@ def plan():
                        "routing allowance. It frees up gradually over the next day; "
                        "please try again later.", 429)
 
+    club_start = None
+    if CLUB is not None:                       # club mode: one of the club's starts
+        ids = [s["id"] for s in CLUB.starts]
+        club_start = _choice(f.get("club_start"), ids, ids[0])
+
     # If the user picked an autocomplete suggestion (and didn't then edit the text),
     # route from its exact coordinates but keep the readable label for display.
     location_arg = f.get("location", "").strip()
@@ -299,7 +314,7 @@ def plan():
             ride_type=ride_type,
             shapes=shapes,
             surface_source=_choice(f.get("surface_source"), SURFACE_SOURCES, "ors"),
-            ride_area=(f.get("ride_area", "").strip() or None),
+            ride_area=(f.get("ride_area", "").strip() or None) if CLUB is None else None,
             tolerance=_clamp(f.get("tolerance", 3), 0, 50, 3),
             speed=_clamp(f.get("speed", 17), 3, 40, 17),
             candidates=int(_clamp(f.get("candidates", 12), 1, 20, 12)),
@@ -309,6 +324,7 @@ def plan():
             api_key=os.environ.get("ORS_API_KEY"),
             n_alternatives=2,
             near=_form_near(f),
+            club=CLUB, club_start=club_start,
         )
     except (ValueError, RuntimeError) as exc:      # expected: bad location, no key, no routes…
         # These carry user-friendly text from the planner; safe to show.
@@ -374,6 +390,7 @@ def plan():
             "turns": c.turns,
             "turns_per": c.turns / max(c.distance_km * per_unit, 0.1),
             "unrideable_pct": c.unrideable_frac * 100, "score": c.total_score,
+            "club_pct": c.club_frac * 100 if CLUB is not None else None,
             "gpx": f"{base.name}.gpx", "dlname": f"{dlnames[i]}.gpx",
             "rw_name": f"{result.when:%b} {result.when.day} · {dist_num} {unit} "
                        f"{c.shape} · {headline}",
@@ -445,7 +462,7 @@ CANDIDATE_COLOR = "#7c3aed"
 SHARED_CARD_FIELDS = ("role", "headline", "rank", "shape", "dist", "climb", "ride_time",
                       "verdict", "wind_score", "wind_line", "reasons", "gravel_pct",
                       "hwy_pct", "lane_pct", "unrideable_pct", "dlname", "turns",
-                      "turns_per")
+                      "turns_per", "club_pct")
 
 
 def _field_json(wind):

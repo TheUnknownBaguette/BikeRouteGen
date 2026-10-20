@@ -758,6 +758,34 @@ def _parse_latlng(s: str):
     return float(parts[0]), float(parts[1])
 
 
+@app.command(name="club-build")
+def club_build(
+    config: str = typer.Argument("club/club.json", help="The club's club.json."),
+    no_names: bool = typer.Option(False, "--no-names",
+                                  help="Skip naming new exits by road (no network)."),
+):
+    """Rebuild a club's roads + exits from its ride files (writes club_data.json).
+
+    Run after adding or removing rides in the club's routes folder. Exits keep the
+    enabled / home_only / name you set on them, matched by exit id.
+    """
+    from . import club as clubmod
+    try:
+        with console.status("[cyan]Reading the club's rides…"):
+            data = clubmod.build(config, name_roads=not no_names)
+    except Exception as exc:
+        console.print(Panel(str(exc), title="[bold red]Error", border_style="red"))
+        raise typer.Exit(code=1)
+    t = Table(title=f"Club exits ({data['rides']} rides)", header_style="bold")
+    for col in ("Id", "Name", "Rides", "Ends (km out)", "Enabled", "Home only"):
+        t.add_column(col)
+    for e in data["exits"]:
+        t.add_row(e["id"], e["name"], str(e["rides"]), f"{e['end_km']:.1f}",
+                  "yes" if e["enabled"] else "[dim]no[/]",
+                  "yes" if e["home_only"] else "")
+    console.print(t)
+
+
 @app.command()
 def classify(
     location: str = typer.Option(

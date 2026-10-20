@@ -107,6 +107,8 @@ class Candidate:
     busy_lane_frac: float = 0.0 # on a BUSY road (main class or ORS-poor) with a painted lane
     sharrow_frac: float = 0.0   # on a road with sharrows (shared-lane markings)
     turns: int = 0              # left/right turns on the cue sheet (set by `evaluate`)
+    club_frac: float = 0.0      # club mode: share of the in-town riding on the club's own
+                                # roads (windroute/club.py); 0 outside club mode
     good_gravel_frac: float = 0.0  # fraction on confirmed GOOD gravel (OSM quality; Task 3c)
     unrideable_frac: float = 0.0   # fraction on unrideable surface (mud/ground/grade5; OSM only)
     surface_by_source: dict = field(default_factory=dict)  # source name -> unpaved_frac

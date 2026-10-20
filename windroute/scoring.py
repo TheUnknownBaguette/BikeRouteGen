@@ -353,6 +353,9 @@ class RouteWeights:
     turn_free_per_km: float = TURN_FREE_PER_KM
     w_tidy: float = W_TIDY
     tidy_free_per_km: float = TIDY_FREE_PER_KM
+    # Club mode only (windroute/club.py): bonus per share of the in-town riding on the
+    # club's roads. 0 here, so plans outside club mode are unchanged.
+    w_club: float = 0.0
 
 
 # grid-farmland ROAD == today's constants (single source of truth, byte-identical).
@@ -573,6 +576,8 @@ def evaluate(candidates, wind: Wind, ride_type: str, target_km: float,
                          + (w.w_path * path_penalty) + (w.w_bikelane * lane_bonus)
                          + (w.w_sharrow * c.sharrow_frac) + (w.w_turn * turn_penalty)
                          + (w.w_tidy * tidy_penalty))
+        if w.w_club:                              # club mode only
+            c.total_score += w.w_club * c.club_frac
 
     return sorted(candidates, key=lambda c: c.total_score, reverse=True)
 

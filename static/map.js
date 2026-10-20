@@ -131,6 +131,23 @@
     else map.setView([39.5, -96], 4);                    // continental US
     moved();                                             // the opening view counts too
 
+    // club mode: the start is one of the club's start points, picked in the form
+    var clubStarts = document.querySelectorAll('input[name="club_start"]');
+    if (clubStarts.length) {
+      var addr = document.getElementById("club-address");
+      clubStarts.forEach(function (r) {
+        r.addEventListener("change", function () {
+          if (!r.checked) return;
+          pLat.value = r.dataset.lat; pLng.value = r.dataset.lng;
+          if (addr) addr.textContent = r.dataset.address || "";
+          setStart(+r.dataset.lat, +r.dataset.lng, 13);
+          try { window.dispatchEvent(new CustomEvent("wr:picked", { detail: null })); } catch (e) {}
+        });
+      });
+      if (isFinite(lat0)) map.setView([lat0, lng0], 13);
+      return;
+    }
+
     map.on("click", function (e) {
       var lat = e.latlng.lat, lng = e.latlng.lng;
       var label = lat.toFixed(5) + ", " + lng.toFixed(5);

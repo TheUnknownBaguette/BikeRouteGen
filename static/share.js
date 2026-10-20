@@ -152,6 +152,7 @@
     if (c.hwy_pct >= 5) s += stat("warn", Math.round(c.hwy_pct) + "% busy road");
     if (c.lane_pct >= 1) s += stat("good", Math.round(c.lane_pct) + "% bike lane / sharrows");
     if (c.turns) s += stat(+c.turns_per > (c.dist && / km$/.test(c.dist) ? 0.93 : 1.5) ? "warn" : "", IC.turn + esc(c.turns) + " turns");
+    if (c.club_pct >= 1) s += stat("good", Math.round(c.club_pct) + "% club roads");
     if (c.unrideable_pct > 0) s += stat("bad", Math.round(c.unrideable_pct) + "% unrideable");
     var why = (c.reasons || []).map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("");
     return '<div class="rcard' + (r.pick ? "" : " compact") + '" role="button" tabindex="0" data-route="' + r.id +

@@ -603,6 +603,31 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
     into the `#fragment` — no server storage, never expires, server never sees the route.
     ~5 KB for 3 routes. Shared pages build GPX in the browser as a blob: link (an
     `<a download>` isn't CSP-gated; scripts can't fetch() it back under `default-src 'self'`).
+- **Club mode (Oct 2026, GAME_PLAN item 8):** a second Render service from the same repo
+  with `CLUB_CONFIG=club/club.json` becomes a site for the owner's (public) Champaign-
+  Urbana club. `windroute/club.py`; `club.json` (hand-edited: name, starts, weight) +
+  `club_data.json` (built by `cli club-build` from `club/routes/*.tcx|gpx`, which are
+  gitignored, 21 MB). Two parts, both off outside club mode:
+  - **Club roads:** every ~20 m grid cell the club's rides pass through. `Candidate.club_frac`
+    = share of the in-town riding (within `town_km`, 6.5, of the start) on them; scored as
+    `RouteWeights.w_club` (0 on the main site; `club_road_weight` 0.5 in club mode). Owner
+    chose a strong preference over fixed exits so routes can still change things up.
+  - **Club loops:** the ORS router rarely picks the club's streets itself, so half the
+    candidates are the `club loop` shape (`routing._make_club_loop`): ONE ORS call from the
+    start through an exit's 4 waypoints, a polygon loop bulging outward from the exit's end,
+    and home by the same exit or the next one over. Exits come from `club.find_exits`: rides
+    grouped by where they cross 4.5 km out, followed until fewer than half still ride
+    together (they spread out, ~4.5-9 km). Exits that leave no room for a loop on a short
+    ride are dropped (`routing.club_exits_for_ride`, 70% cap).
+  - Starts: Neutral Cycle (624 S Fifth St) and CBC (Campus Bike Center, E Gregory Dr).
+    The form shows a start picker instead of the address search; cards show "N% club roads".
+  - First live check (Oct 19, SE 4 mph): all 12 candidates came back; top picks 93-100%
+    club roads; ordinary loops/rectangles still compete.
+- **Waypoint snapping (Oct 2026):** ORS calls send `radiuses` = 350 m for the start, 1.5 km
+  for every other waypoint (`routing.START_SNAP_M` / `WAYPOINT_SNAP_M`). Corners in
+  section-road farm country can be ~800 m from a road, and ORS's default 350 m dropped those
+  candidates with code 2010 (found around Champaign: loops/lollipops were silently failing).
+  Waypoints that already snapped are unaffected; previously-lost candidates now come back.
 - **Changing-wind scoring (Oct 2026):** routes are scored on the wind you'll MEET, not the
   wind when you leave. `get_wind(..., radius_km=target)` makes ONE multi-location
   Open-Meteo request (start + a ring of 6 points at ~1/3 the ride distance) and attaches a

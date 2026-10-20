@@ -1,0 +1,24 @@
+{
+  "name": "Illini Cycling",
+  "about": "Club starts and the roads the club rides out of town. Routes come from the club's own ride library in routes/.",
+  "starts": [
+    {
+      "id": "neutral",
+      "name": "Neutral Cycle",
+      "address": "624 S Fifth St, Champaign, IL",
+      "lat": 40.1107,
+      "lng": -88.232,
+      "short": "Neutral Cycle"
+    },
+    {
+      "id": "cbc",
+      "name": "CBC (Campus Bike Center)",
+      "address": "Campus Bike Center, E Gregory Dr, Champaign, IL",
+      "lat": 40.104,
+      "lng": -88.2402,
+      "short": "CBC"
+    }
+  ],
+  "routes": "routes",
+  "club_road_weight": 0.5
+}

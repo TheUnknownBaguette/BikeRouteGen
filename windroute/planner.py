@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import datetime as dt
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from dateutil import parser as dateparser
 
@@ -47,7 +47,8 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
                 ride_area=None, tolerance=3.0, candidates=12, corrections=True,
                 corrections_file=None, api_key=None, n_alternatives=2,
                 location_label=None, classify=False, refine=False,
-                speed=None, near=None, fast_roads=True) -> PlanResult:
+                speed=None, near=None, fast_roads=True, club=None,
+                club_start=None) -> PlanResult:
     """Run the full planning pipeline and return a `PlanResult` (no printing/files).
 
     `fast_roads` looks up OSM speed limits / lane counts to penalize fast roads
@@ -59,7 +60,16 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
     town ("233 S Wacker") resolves locally. Raises
     on hard failures (bad location, no routes, missing API key) for the front-end
     to surface.
+
+    `club` (a `club.Club`) + `club_start` (one of its start ids) plan in club mode:
+    the ride starts at that club start (`location` is ignored), about half the
+    candidates leave town on the club's exits ("club loop"), and every route earns
+    the club-roads bonus for its in-town riding on the club's roads.
     """
+    if club is not None:
+        st = club.start(club_start) or club.starts[0]
+        club_start = st["id"]
+        location, location_label = f"{st['lat']},{st['lng']}", st["name"]
     ride_type = ride_type.lower().strip()
     if isinstance(shapes, str):
         shape_list = [s.strip().lower() for s in shapes.split(",") if s.strip()]
@@ -115,6 +125,12 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
     weights = engine.weights_for(archetype, ride_type)
     loop_geom = engine.loop_geom_for(archetype)
     shape_list = engine.shapes_for(archetype, shape_list)
+    if club is not None:
+        weights = replace(weights, w_club=club.weight)
+        mixed = []                                # club loops alternate with the rest
+        for s in shape_list:
+            mixed += ["club loop", s]
+        shape_list = mixed
     if archetype and archetype not in ("grid-farmland", "unknown"):
         notes.append(f"terrain: tuning for {archetype} "
                      f"(shapes: {', '.join(shape_list)})")
@@ -154,7 +170,11 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
     cands = engine.generate_candidates(
         lat, lng, target_km, ride_type, api_key, n=candidates,
         shapes=shape_list, into_wind_bearing=aim, zone=zone,
-        loop_geom=loop_geom)
+        loop_geom=loop_geom,
+        club_exits=club.exits_for(club_start) if club is not None else None)
+    if club is not None:
+        for c in cands:
+            c.club_frac = club.club_frac(c.coords, club_start)
 
     mode = surface_source.lower()
     coverage = None
@@ -223,7 +243,8 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
             cands, ranked, api_key=api_key, ride_type=ride_type, wind=wind,
             target_km=target_km, tolerance_km=tolerance_km, weights=weights,
             busy_baseline=busy_baseline, osm_src=osm_src, corr_cache=corr_cache,
-            speed_mph=speed_mph, fast_src=fast_src)
+            speed_mph=speed_mph, fast_src=fast_src,
+            club_frac=(lambda co: club.club_frac(co, club_start)) if club else None)
         if note:
             notes.append(note)
         if classify and cands:                   # refined geometry can shift the floor
@@ -515,7 +536,8 @@ def _set_traffic(c, src):
 
 def _refine_candidates(cands, ranked, *, api_key, ride_type, wind, target_km,
                        tolerance_km, weights, busy_baseline, osm_src, corr_cache,
-                       speed_mph=engine.DEFAULT_RIDE_SPEED_MPH, fast_src=None):
+                       speed_mph=engine.DEFAULT_RIDE_SPEED_MPH, fast_src=None,
+                       club_frac=None):
     """Local-search refine the top few candidates in place (work-plan Task 6).
 
     Builds a full-objective `score_fn` — the SAME OSM overlays + corrections + scoring
@@ -541,6 +563,8 @@ def _refine_candidates(cands, ranked, *, api_key, ride_type, wind, target_km,
             _set_traffic(c, fast_src)
         if corr_cache is not None:
             corr_cache.apply(c)
+        if club_frac is not None:
+            c.club_frac = club_frac(c.coords)
         engine.evaluate([c], wind, ride_type, target_km, tolerance_km,
                         weights=weights, busy_baseline=busy_baseline,
                         speed_mph=speed_mph)

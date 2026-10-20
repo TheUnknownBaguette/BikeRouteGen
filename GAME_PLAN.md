@@ -33,7 +33,7 @@ time: confirm the open questions with the owner, build, test, then mark the item
 
 - Project: `C:\Users\gcook\OneDrive\Gus' School Folder\Code\claude\BikeRouteGen`; the venv is
   `.venv` (rebuilt on this PC in Oct 2026). `run.bat` rebuilds it on other machines.
-- Tests: `.venv/Scripts/python.exe -m pytest -q` (172 passing as of 2026-10-12, all offline).
+- Tests: `.venv/Scripts/python.exe -m pytest -q` (184 passing as of 2026-10-19, all offline).
 - Local preview from Claude Code: the `webapp-c` entry in the parent folder's
   `.claude/launch.json` (waitress on port 5057). Restart it after Python/template changes.
 - `ORS_API_KEY` is set in the Windows user environment. ORS now lives at
@@ -55,6 +55,7 @@ time: confirm the open questions with the owner, build, test, then mark the item
 | 5 | "Fully routable" checks | small-medium | Needs an example bad route from the owner first |
 | 6 | Strava segment popularity (optional) | medium | Thin signal, tight limits; only if 3-4 fall short |
 | 7 | Ride with GPS OAuth for friends (later) | large | Only if other people start using the site |
+| 8 | Club version (start points + known exits) | medium | Owner's next priority (2026-10-19) |
 
 Smaller leftovers already listed in PROJECT_CONTEXT "Possible next steps" (do any time):
 default the start box to the most recent start; fit `WIND_SPEED_EFFECT` (0.25) to ride
@@ -259,6 +260,53 @@ The fix depends on which failure it is.
 
 ---
 
+## 8. Club version: set start points + known routes out of town
+
+**Goal:** a second site for the owner's (public) club: pick one of a few club start
+points in one town, and routes leave town on the club's known exit roads, then loop on
+the wind like the main site. Same algorithm; every algorithm change reaches both.
+
+**Decided (2026-10-19):**
+- **One codebase, "club mode"** (option A). A club config (club name, start points,
+  exit routes) turns it on; a second Render service runs the same repo with a setting
+  pointing at that config. No fork, no second copy of the planner.
+- **Public is fine:** the club is public, so its config and routes can live in the repo
+  (e.g. `club/`).
+- **Exit routes come from the club's existing route library** (GPX/TCX the owner
+  downloads). Plan: find the stretches the club's rides share leaving each start (the
+  common way out of town) and use those as the fixed exits, rather than hand-drawing them.
+- **Coming home:** the same exit back is fine, but not required; the scorer may pick a
+  different known exit for the return.
+- **Access:** open to anyone with the link (same hardening and rate limits as the main site).
+- **Routing key:** a second free ORS key for the club service (its own 2,000/day), as
+  `ORS_API_KEY` on that Render service.
+
+**How it fits the code:** the `staging` shape already does "fixed leg out -> wind loop
+-> leg back". Club mode swaps the generated stem for a known exit, built from each exit's
+end point; the loop, scoring and options are unchanged. Front-end: the start box becomes
+a short list of club starts. Planner stays the single pipeline (`plan_routes` gets the
+club starts/exits as inputs).
+
+**Club data (2026-10-19):** 70 TCX files in `club/routes/` (Champaign-Urbana; one
+duplicate, `Buck_s_Pond (1)`). Two starts: **Neutral Cycle** (624 S Fifth St,
+40.1107,-88.2320; 45 routes) and **CBC** = Campus Bike Center (E Gregory Dr,
+40.1040,-88.2402; 19 routes). Three one-off starts are ignored. Clustering where the rides
+cross ~4.5 km out found 10 exits (W 27, S via First St 26, NE 15, SE 14, E 9, N 8, WNW 6,
+NNE 5, SSE 4, E-2 4). Owner: ride counts don't reflect how often each is used; exit 10 is
+mostly a way HOME; exit 9 is rarely used now; the club has no names for them (name them
+by main road); end each exit where the rides spread out (open country), not at a fixed
+circle. The files are mainly there to show which roads are good for getting out of town.
+
+**Built (2026-10-19), owner's choice: a strong "club roads" preference** (not fixed exits),
+so routes can still change things up. See PROJECT_CONTEXT "Club mode" for how it works.
+
+**Still to do:** the club's display name (set: "Illini Cycling");
+the owner reviews the exits `club-build` found (disable rarely-used ones, mark way-home-only
+ones); create the second Render service (`CLUB_CONFIG=club/club.json`, second
+`ORS_API_KEY`); tune `club_road_weight` (0.5) after a few real club plans.
+
+---
+
 ## 7. Ride with GPS OAuth for friends (later)
 
 If friends start using the hosted site, let each visitor "Connect Ride with GPS" via OAuth
@@ -289,3 +337,4 @@ database), and handling token refresh. Revisit when there's demand.
 | 2026-10-12 | code-health pass | **Done (behavior-neutral; scores byte-identical vs before).** Removed dead code (`scoring.explain`, `Candidate.surface_score`, `generate_candidates(sleep=)`, unused imports/constants, duplicate `_haversine_km`). Safety: web form choice fields whitelisted, GPX names XML-escaped, share links can't inject HTML (tooltip/color), failed region lookups no longer cached forever, thread-safe suggest cache, CLI password prompted hidden. One User-Agent with a contact link for every outside service. Privacy page now covers Photon, map tiles, browser storage and public Ride with GPS uploads. Dependency floors raised to patched releases; CI actions bumped. `tests/test_hardening.py`. **Open for the owner:** rate limit trusts a spoofable `X-Forwarded-For` on Render; the 100 km cap is a leftover of ORS round trips (directions allow far more); archive the two finished workplans; `_smoothed_ascent` treats elevation <= 0 m as missing data |
 | 2026-10-12 | crossing counter | **Fixed.** Shared points / shared stretches only count as a crossing when the second pass goes from one side of the first to the other. Oct 11 ridden route: 11 -> 1 (it lost 0.04 to this). Owner: keep wind scoring and wind-led labels on calm days (a small tailwind still matters) |
 | 2026-10-12 | owner decisions from the review | **Done.** (1) Per-IP limit raised to 30 plans / 5 min (env `RATE_LIMIT_PLANS`) plus a site-wide cap of 1,800 ORS calls per rolling 24 h (env `SITE_ORS_PER_DAY`), which a faked `X-Forwarded-For` can't get around; past it the form says to try later instead of failing. (2) Ride cap 100 -> 250 km (`routing.MAX_RIDE_KM`), checked before any lookup; wind window +16 h. (3) Finished workplans moved to `docs/archive/`. (4) Climb counts ground below sea level (nodata is now exactly 0.0 or < -500 m). Tests: `tests/test_limits_and_climb.py`; 172 passing |
+| 2026-10-19 | 8 club mode | **Built.** Club roads bonus (`w_club` 0.5, in-town share) + `club loop` candidates through the club's exits (found from 69 club rides; 10 exits). Start picker (Neutral Cycle / CBC), "N% club roads" on cards, `cli club-build`. Also: ORS waypoints may snap 1.5 km (corners in farm country were silently failing). `tests/test_club.py`; 184 passing |

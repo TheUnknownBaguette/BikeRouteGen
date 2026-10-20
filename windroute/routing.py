@@ -114,7 +114,7 @@ SUIT_POOR_MAX = 5
 # --------------------------------------------------------------------------- #
 # Route generation (OpenRouteService, needs a free API key)
 # --------------------------------------------------------------------------- #
-SHAPES = ("loop", "out-and-back", "lollipop", "rectangle", "staging")
+SHAPES = ("loop", "out-and-back", "lollipop", "rectangle", "staging", "club loop")
 
 # Polygon-loop variety per seed: cycle vertex counts and travel orientation so a
 # handful of "loop" seeds explore different road sets / wind lines, not clones.
@@ -164,6 +164,15 @@ def _strip_backtracks(coords, eles=None, tol_m=5.0, names=None):
     return new_coords, new_eles, new_names
 
 
+# How far ORS may look for a road from each waypoint. Its default is 350 m, but a
+# geometric corner in section-road farm country can sit ~800 m from the nearest road
+# (roads every mile), which failed whole candidates with "no routable point" (code
+# 2010). The start stays strict (it's a real place the rider picked); the other
+# waypoints are aiming points, so they may snap further.
+START_SNAP_M = 350
+WAYPOINT_SNAP_M = 1500
+
+
 def _ors_directions(api_key, profile, coordinates, timeout):
     """One ORS directions call over an explicit list of through-waypoints.
 
@@ -187,6 +196,7 @@ def _ors_directions(api_key, profile, coordinates, timeout):
         "instructions": True,             # only for the road names (cue sheet)
         # can't (or shouldn't) ride these; accepted by all cycling profiles
         "options": {"avoid_features": ["ferries", "steps", "fords"]},
+        "radiuses": [START_SNAP_M] + [WAYPOINT_SNAP_M] * (len(coordinates) - 1),
     }
 
     _count_ors_call()
@@ -586,6 +596,66 @@ def _make_rectangle(api_key, profile, lat, lng, target_km, bearing, timeout,
                      road_names=names))
 
 
+CLUB_EXIT_SHARE_MAX = 0.7   # a club loop's exits (out + home) may use this much of the ride
+
+
+def club_exits_for_ride(exits, target_km):
+    """The exits short enough to leave room for a loop on a ride of `target_km`."""
+    return [e for e in (exits or []) if 2.0 * e["km"] <= CLUB_EXIT_SHARE_MAX * target_km]
+
+
+def _angle_off(a, b):
+    return abs((a - b + 180.0) % 360.0 - 180.0)
+
+
+def _club_route_plan(exits, bearing, idx):
+    """(way out, way home) for club-loop seed `idx`: the ways out nearest the aiming
+    bearing (into the wind) in turn; every other round comes home by the next exit
+    over instead of the same one. Home-only exits are only ever ways home."""
+    outs = sorted((e for e in exits if not e.get("home_only")),
+                  key=lambda e: _angle_off(e["bearing"], bearing))
+    if not outs:
+        return None, None
+    k = min(3, len(outs))
+    out = outs[idx % k]
+    home = out
+    if (idx // k) % 2 == 1:
+        others = [e for e in exits if e is not out and _angle_off(e["bearing"], out["bearing"]) <= 75]
+        if others:
+            home = min(others, key=lambda e: _angle_off(e["bearing"], out["bearing"]))
+    return out, home
+
+
+def _make_club_loop(api_key, profile, lat, lng, target_km, bearing, idx, exits, timeout,
+                    loop_sides=_LOOP_SIDES, loop_detour=1.25):
+    """Club mode: leave town on one of the club's exits, loop in the country, come
+    home on the same exit or the next one over (club.py). One routing call through
+    the exit waypoints, the loop's corners and the way home, so the in-town part
+    follows the club's streets instead of whatever the router would pick. The loop
+    bulges outward from where the exit ends; which exit leads out follows the wind
+    (`bearing`), and the scorer still ranks the result like any other route."""
+    out, home = _club_route_plan(exits, bearing, idx)
+    if out is None:
+        raise requests.RequestException("no club exit to leave by")
+    out_wps = [tuple(p) for p in out["waypoints"]]
+    home_wps = [tuple(p) for p in home["waypoints"]]
+    loop_km = max(5.0, target_km - out["km"] - home["km"])
+    n_sides = loop_sides[idx % len(loop_sides)]
+    orient = 1 if (idx // len(loop_sides)) % 2 == 0 else -1
+    verts = _polygon_loop_waypoints(out_wps[-1][0], out_wps[-1][1], loop_km,
+                                    out["bearing"], n_sides, orient, loop_detour)
+    way = ([(lat, lng)] + out_wps + verts[1:-1] + [home_wps[-1]]
+           + home_wps[-2::-1] + [(lat, lng)])
+    pts = [[p[1], p[0]] for p in way]
+    coords, eles, dist, paved, unpaved, busy, path, path_run, names, poor = _ors_directions(
+        api_key, profile, pts, timeout)
+    return _without_spurs(Candidate(
+        coords=coords, distance_km=dist, ascent_m=_smoothed_ascent(eles) if eles else 0.0,
+        paved_frac=paved, unpaved_frac=unpaved, busy_frac=busy, poor_road_frac=poor,
+        path_frac=path, path_run_frac=(path_run / dist if dist else 0.0),
+        shape="club loop", eles=eles or None, road_names=names))
+
+
 def _candidate_from_waypoints(api_key, profile, waypoints, shape, timeout):
     """Route a through-path over `waypoints` ((lat,lng) corners) -> a Candidate.
 
@@ -669,7 +739,7 @@ MAX_RIDE_KM = 250.0
 def generate_candidates(lat, lng, target_km, ride_type, api_key,
                         n=8, timeout=40,
                         shapes=("loop",), into_wind_bearing=None, zone=None,
-                        loop_geom=None, workers=ORS_MAX_WORKERS):
+                        loop_geom=None, workers=ORS_MAX_WORKERS, club_exits=None):
     """Generate `n` candidate routes of ~target_km from (lat, lng).
 
     `shapes` chooses which route forms to produce ("loop", "lollipop", "rectangle",
@@ -685,6 +755,10 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
     `loop_geom` is an optional (loop_sides_tuple, detour) pair from
     `loop_geom_for(archetype)` controlling the polygon-loop shape (more sides + a
     bigger detour for curvy terrain). None -> today's grid-farmland geometry.
+
+    `club_exits` (club mode; `club.Club.exits_for`) enables the "club loop" shape:
+    out on a club exit, a loop in the country, home on the same or the next exit.
+    It's dropped when no exit leaves room for a loop at this distance.
 
     `workers` bounds how many candidate ORS calls run concurrently (each candidate
     is an independent round-trip). The default turns ~12 sequential calls into a few
@@ -705,6 +779,9 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
     # produce it without one (the caller adds it to `shapes` only when zone is set).
     if zone is None:
         shapes = [s for s in shapes if s != "staging"] or ["loop"]
+    club_exits = club_exits_for_ride(club_exits, target_km)
+    if not club_exits:
+        shapes = [s for s in shapes if s != "club loop"] or ["loop"]
 
     # Build the per-candidate work plan, splitting n across the chosen shapes.
     plan = []
@@ -739,6 +816,10 @@ def generate_candidates(lat, lng, target_km, ride_type, api_key,
         if shape == "rectangle":
             return _make_rectangle(api_key, profile, lat, lng, target_km, bearing, timeout,
                                    cross_sign=(1 if idx % 2 == 0 else -1))
+        if shape == "club loop":
+            return _make_club_loop(api_key, profile, lat, lng, target_km, center, idx,
+                                   club_exits, timeout, loop_sides=loop_sides,
+                                   loop_detour=loop_detour)
         if shape == "staging":
             return _make_staging(api_key, profile, lat, lng, target_km, zone,
                                  idx, timeout, loop_sides=loop_sides,

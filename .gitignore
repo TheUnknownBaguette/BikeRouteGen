@@ -31,3 +31,7 @@ road-notes.txt
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Club ride library: raw GPX/TCX stay local (21 MB+); the site only needs the
+# built club/club_data.json. Rebuild it with: python -m windroute.cli club-build
+club/routes/

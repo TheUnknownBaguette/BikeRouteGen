@@ -28,6 +28,7 @@
       {% if r.hwy_pct >= 5 %}<span class="stat warn">{{ '%.0f'|format(r.hwy_pct) }}% busy road</span>{% endif %}
       {% if r.lane_pct >= 1 %}<span class="stat good">{{ '%.0f'|format(r.lane_pct) }}% bike lane / sharrows</span>{% endif %}
       {% if r.turns %}<span class="stat {{ 'warn' if r.turns_per > (0.93 if unit == 'km' else 1.5) else '' }}" title="{{ '%.1f'|format(r.turns_per) }} turns per {{ unit }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20v-7a4 4 0 0 1 4-4h10M15 5l4 4-4 4"/></svg>{{ r.turns }} turns</span>{% endif %}
+      {% if r.club_pct is not none and r.club_pct >= 1 %}<span class="stat good" title="Share of the in-town riding on roads from the club's rides">{{ '%.0f'|format(r.club_pct) }}% club roads</span>{% endif %}
       {% if r.unrideable_pct > 0 %}<span class="stat bad">{{ '%.0f'|format(r.unrideable_pct) }}% unrideable</span>{% endif %}
     </div>
     {% if r.reasons %}<ul class="why">{% for x in r.reasons %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
