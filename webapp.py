@@ -40,10 +40,34 @@ app.config["MAX_CONTENT_LENGTH"] = 32 * 1024
 # Club mode: CLUB_CONFIG points at a club's club.json (e.g. club/club.json). The
 # form then offers the club's start points instead of an address search, and plans
 # prefer the club's roads out of town (windroute/club.py). Unset = the normal site.
+# CLUB_HOSTS (comma list, e.g. "routes.illinicycling.org") makes ONE service serve
+# both: requests to those host names get the club site, every other host the normal
+# one. Without CLUB_HOSTS the whole service is the club site. Club plans use
+# CLUB_ORS_API_KEY when it's set (the club's own routing quota), else ORS_API_KEY.
 _club_cfg = os.environ.get("CLUB_CONFIG", "").strip()
 CLUB = (clubmod.load(_club_cfg if os.path.isabs(_club_cfg)
                      else Path(__file__).parent / _club_cfg) if _club_cfg else None)
-app.jinja_env.globals["club"] = CLUB
+CLUB_HOSTS = {h.strip().lower() for h in os.environ.get("CLUB_HOSTS", "").split(",")
+              if h.strip()}
+
+
+def current_club():
+    """The club this request is for, or None for the normal site."""
+    if CLUB is None:
+        return None
+    if not CLUB_HOSTS:
+        return CLUB
+    host = (request.host or "").split(":")[0].lower()
+    return CLUB if host in CLUB_HOSTS else None
+
+
+@app.context_processor
+def _club_context():
+    return {"club": current_club()}
+
+
+def _ors_key(club):
+    return (club is not None and os.environ.get("CLUB_ORS_API_KEY")) or os.environ.get("ORS_API_KEY")
 
 OUT_DIR = Path(__file__).parent / "static" / "out"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -69,6 +93,8 @@ _rl_hits: dict[str, list[float]] = defaultdict(list)
 # the same key. It's in memory, so it restarts when the host does; ORS's own quota
 # message is the backstop after that.
 SITE_ORS_PER_DAY = int(os.environ.get("SITE_ORS_PER_DAY", "1800"))
+if CLUB is not None and CLUB_HOSTS and os.environ.get("CLUB_ORS_API_KEY"):
+    SITE_ORS_PER_DAY *= 2                 # two sites on two keys, one shared counter
 DAY_S = 24 * 3600
 _ors_lock = threading.Lock()
 _ors_marks: deque = deque([(time.time(), 0)])   # (time, process ORS total) per plan
@@ -133,7 +159,13 @@ def _clamp(value, lo: float, hi: float, default: float) -> float:
 @app.after_request
 def _security_headers(resp):
     resp.headers["X-Content-Type-Options"] = "nosniff"
-    resp.headers["X-Frame-Options"] = "DENY"
+    # Nobody may put these pages in a frame, except a club's own website (club.json
+    # "embed_on") for the club site. X-Frame-Options can't name a site, so the club
+    # site relies on the CSP frame-ancestors below instead.
+    club = current_club()
+    framers = " ".join(club.embed_on) if club is not None and club.embed_on else "'none'"
+    if framers == "'none'":
+        resp.headers["X-Frame-Options"] = "DENY"
     # OSM tile policy requires a Referer on browser tile requests; send only the
     # origin cross-site (no path/query, so route params never leak).
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
@@ -142,7 +174,8 @@ def _security_headers(resp):
         "img-src 'self' data: https://tile.openstreetmap.org "
         "https://*.tile-cyclosm.openstreetmap.fr https://*.tile.opentopomap.org; "
         "style-src 'self' 'unsafe-inline'; "
-        "script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+        "script-src 'self'; base-uri 'none'; form-action 'self'; "
+        f"frame-ancestors {framers}"
     )
     # Only assert HSTS when actually reached over HTTPS (Render terminates TLS and
     # forwards the original scheme), so a plain-HTTP local run isn't pinned to https.
@@ -286,9 +319,10 @@ def plan():
                        "routing allowance. It frees up gradually over the next day; "
                        "please try again later.", 429)
 
+    club = current_club()
     club_start = None
-    if CLUB is not None:                       # club mode: one of the club's starts
-        ids = [s["id"] for s in CLUB.starts]
+    if club is not None:                       # club mode: one of the club's starts
+        ids = [s["id"] for s in club.starts]
         club_start = _choice(f.get("club_start"), ids, ids[0])
 
     # If the user picked an autocomplete suggestion (and didn't then edit the text),
@@ -314,17 +348,17 @@ def plan():
             ride_type=ride_type,
             shapes=shapes,
             surface_source=_choice(f.get("surface_source"), SURFACE_SOURCES, "ors"),
-            ride_area=(f.get("ride_area", "").strip() or None) if CLUB is None else None,
+            ride_area=(f.get("ride_area", "").strip() or None) if club is None else None,
             tolerance=_clamp(f.get("tolerance", 3), 0, 50, 3),
             speed=_clamp(f.get("speed", 17), 3, 40, 17),
             candidates=int(_clamp(f.get("candidates", 12), 1, 20, 12)),
             corrections=("corrections" in f),
             classify=("classify" in f),
             refine=("refine" in f),
-            api_key=os.environ.get("ORS_API_KEY"),
+            api_key=_ors_key(club),
             n_alternatives=2,
             near=_form_near(f),
-            club=CLUB, club_start=club_start,
+            club=club, club_start=club_start,
         )
     except (ValueError, RuntimeError) as exc:      # expected: bad location, no key, no routes…
         # These carry user-friendly text from the planner; safe to show.
@@ -390,7 +424,7 @@ def plan():
             "turns": c.turns,
             "turns_per": c.turns / max(c.distance_km * per_unit, 0.1),
             "unrideable_pct": c.unrideable_frac * 100, "score": c.total_score,
-            "club_pct": c.club_frac * 100 if CLUB is not None else None,
+            "club_pct": c.club_frac * 100 if club is not None else None,
             "gpx": f"{base.name}.gpx", "dlname": f"{dlnames[i]}.gpx",
             "rw_name": f"{result.when:%b} {result.when.day} · {dist_num} {unit} "
                        f"{c.shape} · {headline}",

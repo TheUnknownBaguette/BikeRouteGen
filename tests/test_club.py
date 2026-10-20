@@ -187,7 +187,7 @@ def test_planner_club_mode(monkeypatch):
 def test_web_club_mode(monkeypatch):
     c = _test_club()
     monkeypatch.setattr(webapp, "CLUB", c)
-    monkeypatch.setitem(webapp.app.jinja_env.globals, "club", c)
+    monkeypatch.setattr(webapp, "CLUB_HOSTS", set())        # whole site is the club
     monkeypatch.setattr(webapp, "_rate_limited", lambda ip: False)
     page = webapp.app.test_client().get("/").data.decode()
     assert 'name="club_start"' in page and "Plan a club ride" in page
@@ -205,8 +205,33 @@ def test_web_club_mode(monkeypatch):
     assert seen["club_start"] == "a"                       # unknown start -> the first
 
 
+def test_one_service_serves_both_sites_by_host(monkeypatch):
+    c = _test_club()
+    c.embed_on = ["https://illinicycling.org"]
+    monkeypatch.setattr(webapp, "CLUB", c)
+    monkeypatch.setattr(webapp, "CLUB_HOSTS", {"routes.example.org"})
+    client = webapp.app.test_client()
+    main = client.get("/", base_url="https://windroute.onrender.com")
+    assert 'id="location"' in main.data.decode() and "club_start" not in main.data.decode()
+    assert main.headers["X-Frame-Options"] == "DENY"
+    assert "frame-ancestors 'none'" in main.headers["Content-Security-Policy"]
+    clubpage = client.get("/", base_url="https://routes.example.org")
+    assert 'name="club_start"' in clubpage.data.decode()
+    assert "X-Frame-Options" not in clubpage.headers        # the club's site may embed it
+    assert ("frame-ancestors https://illinicycling.org"
+            in clubpage.headers["Content-Security-Policy"])
+
+
+def test_club_plans_use_the_club_key(monkeypatch):
+    monkeypatch.setenv("ORS_API_KEY", "main-key")
+    monkeypatch.setenv("CLUB_ORS_API_KEY", "club-key")
+    assert webapp._ors_key(None) == "main-key"
+    assert webapp._ors_key(_test_club()) == "club-key"
+    monkeypatch.delenv("CLUB_ORS_API_KEY")
+    assert webapp._ors_key(_test_club()) == "main-key"
+
+
 def test_main_site_has_no_club():
-    assert webapp.CLUB is None or webapp.os.environ.get("CLUB_CONFIG")
-    page = webapp.app.test_client().get("/").data.decode()
     if webapp.CLUB is None:
+        page = webapp.app.test_client().get("/").data.decode()
         assert 'id="location"' in page and "club_start" not in page

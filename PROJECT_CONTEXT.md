@@ -619,6 +619,14 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
     grouped by where they cross 4.5 km out, followed until fewer than half still ride
     together (they spread out, ~4.5-9 km). Exits that leave no room for a loop on a short
     ride are dropped (`routing.club_exits_for_ride`, 70% cap).
+  - **Hosting: one Render service serves both sites** (Oct 2026). Render's free tier gives
+    750 instance-hours a month per workspace, enough to keep ONE service awake all month
+    (with an outside pinger) but not two. `CLUB_HOSTS` (e.g. `routes.illinicycling.org`)
+    picks club mode per request by host name (`webapp.current_club()`); club plans use
+    `CLUB_ORS_API_KEY` if set (the daily site cap doubles when it is). The club website is
+    WordPress.com (Personal plan, which strips iframes), so it links to the subdomain;
+    `club.json` `embed_on` still lets illinicycling.org frame it (CSP frame-ancestors; no
+    X-Frame-Options on club pages) if they ever embed it.
   - Starts: Neutral Cycle (624 S Fifth St) and CBC (Campus Bike Center, E Gregory Dr).
     The form shows a start picker instead of the address search; cards show "N% club roads".
   - First live check (Oct 19, SE 4 mph): all 12 candidates came back; top picks 93-100%

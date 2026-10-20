@@ -288,6 +288,7 @@ class Club:
     town_km: float = TOWN_KM_DEFAULT
     weight: float = 0.5                    # RouteWeights.w_club in club plans
     center: tuple = (0.0, 0.0)
+    embed_on: list = field(default_factory=list)   # sites allowed to frame the club page
 
     def start(self, start_id):
         return next((s for s in self.starts if s["id"] == start_id), None)
@@ -341,7 +342,8 @@ def load(path) -> Club:
     return Club(name=cfg.get("name", "Club"), starts=starts,
                 exits=data.get("exits", []), roads=ClubRoads(cells),
                 town_km=float(data.get("town_km", TOWN_KM_DEFAULT)),
-                weight=float(cfg.get("club_road_weight", 0.5)), center=center)
+                weight=float(cfg.get("club_road_weight", 0.5)), center=center,
+                embed_on=list(cfg.get("embed_on", [])))
 
 
 def build(club_json, name_roads=True) -> dict:

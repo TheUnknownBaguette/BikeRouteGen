@@ -189,8 +189,13 @@ same planner, so improvements reach both sites.
 2. Build the club's roads and exits: `python -m windroute.cli club-build`. It writes
    `club/club_data.json` and prints the exits it found; set an exit's `enabled` or
    `home_only` there to change how it's used, and re-run after adding rides.
-3. Host it as a second service from the same repo with `CLUB_CONFIG=club/club.json`
-   (and its own `ORS_API_KEY`, so the club's plans use their own daily quota).
+3. Turn it on in the host's environment: `CLUB_CONFIG=club/club.json`, plus
+   `CLUB_HOSTS=routes.yourclub.org` to serve the club site only on that address (the
+   same service keeps serving the normal site everywhere else; without `CLUB_HOSTS`
+   the whole service is the club site), and optionally `CLUB_ORS_API_KEY` so club
+   plans use the club's own routing quota. Point the address at the host with a
+   CNAME record. `embed_on` in `club.json` lists the club website(s) allowed to show
+   the planner inside one of their pages.
 
 The raw ride files stay out of git (`.gitignore`); only `club_data.json` is needed to run.
 

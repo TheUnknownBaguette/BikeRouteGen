@@ -20,5 +20,10 @@
     }
   ],
   "routes": "routes",
-  "club_road_weight": 0.5
+  "club_road_weight": 0.5,
+  "embed_on": [
+    "https://illinicycling.org",
+    "https://www.illinicycling.org",
+    "https://illinicycling.wordpress.com"
+  ]
 }

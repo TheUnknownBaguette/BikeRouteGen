@@ -302,8 +302,10 @@ so routes can still change things up. See PROJECT_CONTEXT "Club mode" for how it
 
 **Still to do:** the club's display name (set: "Illini Cycling");
 the owner reviews the exits `club-build` found (disable rarely-used ones, mark way-home-only
-ones); create the second Render service (`CLUB_CONFIG=club/club.json`, second
-`ORS_API_KEY`); tune `club_road_weight` (0.5) after a few real club plans.
+ones) (done: Philo Rd off); host it (decided 2026-10-19: same Render service,
+`CLUB_HOSTS=routes.illinicycling.org` via a CNAME on WordPress.com DNS, an uptime pinger
+so it never sleeps, and a WordPress menu link since the Personal plan strips iframes);
+tune `club_road_weight` (0.5) after a few real club plans.
 
 ---
 
