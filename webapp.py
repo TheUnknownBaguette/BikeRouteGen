@@ -395,7 +395,9 @@ def plan():
         opt = option_of.get(id(c))
         role = opt.role if opt else "candidate"
         headline = opt.headline if opt else c.shape.capitalize()
-        color = ROUTE_COLORS[i] if opt and i < len(ROUTE_COLORS) else CANDIDATE_COLOR
+        colors = (club.route_colors if club is not None and club.route_colors
+                  else ROUTE_COLORS)
+        color = colors[i] if opt and i < len(colors) else CANDIDATE_COLOR
         base = OUT_DIR / f"{token}-{i}"
         dist_num = f"{c.distance_km * per_unit:.1f}"
         title = f"{dist_num} {unit} {ride_type} {c.shape} - {headline}"

@@ -214,6 +214,7 @@ def test_one_service_serves_both_sites_by_host(monkeypatch):
     main = client.get("/", base_url="https://windroute.onrender.com")
     assert 'id="location"' in main.data.decode() and "club_start" not in main.data.decode()
     assert main.headers["X-Frame-Options"] == "DENY"
+    assert "data-brand" not in main.data.decode()               # no club theme on the main site
     assert "frame-ancestors 'none'" in main.headers["Content-Security-Policy"]
     clubpage = client.get("/", base_url="https://routes.example.org")
     assert 'name="club_start"' in clubpage.data.decode()

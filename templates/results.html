@@ -1,5 +1,5 @@
 {% extends "app.html" %}
-{% block title %}windroute — {{ label }}{% endblock %}
+{% block title %}{{ club.name if club else 'windroute' }} — {{ label }}{% endblock %}
 {% block panel_label %}Routes{% endblock %}
 {% block head_actions %}
   <button type="button" class="btn sm" id="share-btn" title="Copy a link to these routes">

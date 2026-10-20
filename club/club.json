@@ -3,20 +3,36 @@
   "about": "Club starts and the roads the club rides out of town. Routes come from the club's own ride library in routes/.",
   "starts": [
     {
-      "id": "neutral",
-      "name": "Neutral Cycle",
-      "address": "624 S Fifth St, Champaign, IL",
-      "lat": 40.1107,
-      "lng": -88.232,
-      "short": "Neutral Cycle"
-    },
-    {
       "id": "cbc",
       "name": "CBC (Campus Bike Center)",
+      "short": "CBC",
       "address": "Campus Bike Center, E Gregory Dr, Champaign, IL",
       "lat": 40.104,
-      "lng": -88.2402,
-      "short": "CBC"
+      "lng": -88.2402
+    },
+    {
+      "id": "lifecycle",
+      "name": "LifeCycle",
+      "short": "LifeCycle",
+      "address": "125 1/2 E University Ave, Champaign, IL",
+      "lat": 40.11605,
+      "lng": -88.23759
+    },
+    {
+      "id": "alma",
+      "name": "Alma Mater statue",
+      "short": "Alma",
+      "address": "Alma Mater statue, 1409 W Green St, Urbana, IL",
+      "lat": 40.10991,
+      "lng": -88.22839
+    },
+    {
+      "id": "bikelab",
+      "name": "BikeLab (closed)",
+      "short": "BikeLab",
+      "address": "Old BikeLab spot, 624 S Fifth St, Champaign, IL (shop closed)",
+      "lat": 40.1107,
+      "lng": -88.232
     }
   ],
   "routes": "routes",
@@ -25,5 +41,13 @@
     "https://illinicycling.org",
     "https://www.illinicycling.org",
     "https://illinicycling.wordpress.com"
+  ],
+  "website": "https://illinicycling.org",
+  "theme": "illini",
+  "route_colors": [
+    "#FF5F05",
+    "#7fb2ff",
+    "#2dd4bf",
+    "#e879f9"
   ]
 }

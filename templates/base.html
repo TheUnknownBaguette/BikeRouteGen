@@ -1,13 +1,17 @@
 {% from "_macros.html" import brand, credits with context %}
 <!doctype html>
-<html lang="en">
+<html lang="en"{% if club and club.theme %} data-brand="{{ club.theme }}"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}windroute{% endblock %}</title>
   <meta name="description" content="Wind-aware cycling routes: ride out into the headwind while you're fresh, home with the tailwind.">
+  {% if club and club.theme == 'illini' %}
+  <meta name="theme-color" content="#13294B">
+  {% else %}
   <meta name="theme-color" content="#f2f4f8" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0b0f15" media="(prefers-color-scheme: dark)">
+  {% endif %}
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=asset_v) }}">
   {% block head %}{% endblock %}
 </head>

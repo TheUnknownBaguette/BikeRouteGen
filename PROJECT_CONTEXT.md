@@ -627,7 +627,16 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
     WordPress.com (Personal plan, which strips iframes), so it links to the subdomain;
     `club.json` `embed_on` still lets illinicycling.org frame it (CSP frame-ancestors; no
     X-Frame-Options on club pages) if they ever embed it.
-  - Starts: Neutral Cycle (624 S Fifth St) and CBC (Campus Bike Center, E Gregory Dr).
+  - Starts, in this order (owner, 2026-10-20): CBC, LifeCycle (125 1/2 E University Ave),
+    Alma (the Alma Mater statue), BikeLab (624 S Fifth St; the shop closed but some still
+    start there; it's "Neutral Cycle" in OSM). Only CBC and BikeLab have club rides of their
+    own; the others borrow the nearest start's typical exit paths.
+  - Look: `club.json` `theme: illini` puts `data-brand="illini"` on <html>; style.css's last
+    block is a navy theme (Illinois Blue #13294B, Orange #FF5F05; no Block I, it's a
+    University trademark). `route_colors` makes the top pick orange. Header shows the club
+    name and a "<- Club site" link (`website`). The main site has none of this.
+  - `club-build` keeps each exit's settings by matching where it ENDS (within 1 km), since
+    exit ids shift when a start is added. Philo Rd exit is off.
     The form shows a start picker instead of the address search; cards show "N% club roads".
   - First live check (Oct 19, SE 4 mph): all 12 candidates came back; top picks 93-100%
     club roads; ordinary loops/rectangles still compete.

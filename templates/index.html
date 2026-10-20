@@ -1,6 +1,7 @@
 {% extends "app.html" %}
-{% block title %}windroute — wind-smart cycling routes{% endblock %}
+{% block title %}{% if club %}{{ club.name }} — route planner{% else %}windroute — wind-smart cycling routes{% endif %}{% endblock %}
 {% block head_actions %}
+  {% if club and club.website %}<a class="btn sm" href="{{ club.website }}" title="Back to {{ club.name }}">&larr; Club site</a>{% endif %}
   <a class="btn sm" href="{{ url_for('about') }}">About</a>
 {% endblock %}
 

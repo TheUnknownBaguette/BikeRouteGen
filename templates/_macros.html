@@ -6,7 +6,11 @@
         <path d="M3 9h10a3 3 0 1 0-3-3"/><path d="M3 14h15a3 3 0 1 1-3 3"/><path d="M3 19h7"/>
       </svg>
     </span>
-    <span class="brand-name">windroute{% if club %}<span class="brand-club"> · {{ club.name }}</span>{% endif %}</span>
+    {% if club %}
+    <span class="brand-name">{{ club.name }}</span>
+    {% else %}
+    <span class="brand-name">windroute</span>
+    {% endif %}
   </a>
 {%- endmacro %}
 {% macro credits() -%}

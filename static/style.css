@@ -85,6 +85,7 @@ svg { flex: 0 0 auto; }
 .brand-mark svg { width: 20px; height: 20px; }
 .brand-name { font-family: var(--font-display); font-weight: 700; font-size: 19px; letter-spacing: -.025em; }
 .brand-club { font-weight: 600; font-size: 15px; color: var(--dim); letter-spacing: -.01em; }
+.panel-head .btn { white-space: nowrap; }
 
 /* ------------------------------------------------------------------ app shell */
 body.app { overflow: hidden; }
@@ -208,6 +209,12 @@ select { appearance: none; padding-right: 34px; background-repeat: no-repeat; ba
   width: calc(50% - 4.5px); border-radius: 8px; background: var(--surface); box-shadow: var(--sh-1);
   transition: transform var(--spring-t) var(--spring); }
 .seg:has(.seg-opt:nth-child(2) input:checked)::before { transform: translateX(calc(100% + 3px)); }
+/* three or four options (club start picker): narrower thumb, more stops */
+.seg:has(> .seg-opt:nth-child(3))::before { width: calc((100% - 12px) / 3); }
+.seg:has(> .seg-opt:nth-child(4))::before { width: calc((100% - 15px) / 4); }
+.seg:has(.seg-opt:nth-child(3) input:checked)::before { transform: translateX(calc(200% + 6px)); }
+.seg:has(.seg-opt:nth-child(4) input:checked)::before { transform: translateX(calc(300% + 9px)); }
+.seg:has(> .seg-opt:nth-child(4)) .seg-opt span { padding: 7px 6px; }
 @supports not selector(:has(*)) {
   .seg::before { display: none; }
   .seg-opt input:checked + span { background: var(--surface); box-shadow: var(--sh-1); }
@@ -535,3 +542,40 @@ footer.credits a { color: var(--dim); }
   :root, :root:not([data-theme="light"]) { --mat-thin: var(--surface); --mat-regular: var(--surface); --line: var(--line-2); --faint: var(--dim); }
   .glass, .ac-list, .elev-card, .rcard, details.more, input, select { border-color: var(--ink) !important; }
 }
+
+/* ---------------------------------------------------------- club: Illini theme
+   Club mode with "theme": "illini" in club.json. Illinois Blue #13294B and Illinois
+   Orange #FF5F05, navy in light and dark alike to match the club's website. Contrast:
+   orange on navy 4.8:1, navy on orange 4.8:1, white on navy 14:1. */
+:root[data-brand="illini"] {
+  --bg: #0d1d38; --surface: #13294B; --surface-2: #183259; --surface-3: #213d68;
+  --ink: #f5f7fb; --dim: #bcc7db; --faint: #8794ae;
+  --line: #24406b; --line-2: #31507f;
+  --brand: #FF5F05; --brand-2: #ff7a2e; --brand-ink: #ffb589;
+  --brand-soft: color-mix(in srgb, #FF5F05 20%, #13294B);
+  --on-brand: #13294B;
+  --good: #4ade80; --good-soft: #143a2f;
+  --warn: #fbbf5c; --warn-soft: #3a3020;
+  --bad: #ff8a80; --bad-soft: #43233a;
+  --sh-1: 0 1px 2px rgba(0, 0, 0, .4);
+  --sh-2: 0 8px 22px rgba(0, 0, 0, .45);
+  --sh-3: 0 22px 50px rgba(0, 0, 0, .6);
+  --ring: 0 0 0 3px rgba(255, 95, 5, .5);
+  --mat-thin: color-mix(in srgb, var(--surface) 70%, transparent);
+  --mat-regular: color-mix(in srgb, var(--surface) 80%, transparent);
+  --mat-edge: inset 0 1px 0 rgba(255, 255, 255, .08);
+  --tile-filter: invert(1) hue-rotate(180deg) saturate(.3) brightness(.8) contrast(.9);
+  color-scheme: dark;
+}
+[data-brand="illini"] .brand-mark {
+  background: linear-gradient(160deg, #ff8a3d, #e04f00 75%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 3px 10px rgba(255, 95, 5, .3); }
+[data-brand="illini"] .brand-mark svg { stroke: #13294B; }
+[data-brand="illini"] .btn.primary, [data-brand="illini"] .btn.go { color: var(--on-brand); }
+[data-brand="illini"] .btn.go { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .25), 0 6px 16px rgba(255, 95, 5, .28); }
+@media (hover: hover) {
+  [data-brand="illini"] .btn.go:hover { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .25), 0 8px 22px rgba(255, 95, 5, .38); }
+}
+[data-brand="illini"] .help:hover, [data-brand="illini"] .help:focus { color: var(--on-brand); }
+[data-brand="illini"] input:focus, [data-brand="illini"] select:focus { box-shadow: 0 0 0 3px rgba(255, 95, 5, .22); }
+[data-brand="illini"] .brand-name { color: var(--brand); }

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}windroute — about, privacy &amp; disclaimer{% endblock %}
+{% block title %}{{ club.name if club else 'windroute' }} — about, privacy &amp; disclaimer{% endblock %}
 {% block content %}
   <div class="card prose">
     <h1>About, privacy &amp; disclaimer</h1>

@@ -191,7 +191,7 @@
     var label = String(plan.label || "Shared routes");
     var parts = /^[-\d]/.test(label) ? [label] : label.split(", ");
     document.getElementById("sh-title").textContent = parts[0];
-    document.title = "windroute — " + parts[0];
+    document.title = document.title.split(" — ")[0] + " — " + parts[0];   // keeps the site name
     var lede = document.getElementById("sh-lede");
     lede.textContent = "";
     if (parts.length > 1) { lede.appendChild(document.createTextNode(parts.slice(1).join(", "))); lede.appendChild(document.createElement("br")); }

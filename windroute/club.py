@@ -38,6 +38,7 @@ EXIT_REACH_KM = 9.0        # ... and followed at most this far to see where they
 EXIT_SHARED_M = 40.0       # rides within this of the typical path are still "together"
 EXIT_MIN_RIDES = 4         # an exit needs at least this many ride legs
 EXIT_WAYPOINTS = 4         # waypoints a club candidate routes through on each exit
+EXIT_MATCH_KM = 1.0        # a rebuilt exit ending this close to an old one is the same exit
 DATA_FILE = "club_data.json"
 
 
@@ -289,6 +290,9 @@ class Club:
     weight: float = 0.5                    # RouteWeights.w_club in club plans
     center: tuple = (0.0, 0.0)
     embed_on: list = field(default_factory=list)   # sites allowed to frame the club page
+    website: str = ""                      # the club's own site ("<- Club site" link)
+    theme: str = ""                        # style.css theme ([data-brand="..."]), e.g. illini
+    route_colors: list = field(default_factory=list)  # top pick + alternatives on the map
 
     def start(self, start_id):
         return next((s for s in self.starts if s["id"] == start_id), None)
@@ -343,7 +347,8 @@ def load(path) -> Club:
                 exits=data.get("exits", []), roads=ClubRoads(cells),
                 town_km=float(data.get("town_km", TOWN_KM_DEFAULT)),
                 weight=float(cfg.get("club_road_weight", 0.5)), center=center,
-                embed_on=list(cfg.get("embed_on", [])))
+                embed_on=list(cfg.get("embed_on", [])), website=cfg.get("website", ""),
+                theme=cfg.get("theme", ""), route_colors=list(cfg.get("route_colors", [])))
 
 
 def build(club_json, name_roads=True) -> dict:
@@ -358,17 +363,23 @@ def build(club_json, name_roads=True) -> dict:
               sum(s["lng"] for s in starts) / len(starts))
     exits = find_exits(rides, starts, center)
     data_path = club_json.parent / cfg.get("data", DATA_FILE)
-    old = {}
+    old = []
     if data_path.exists():
-        old = {e["id"]: e for e in json.loads(data_path.read_text(encoding="utf-8"))
-               .get("exits", [])}
+        old = json.loads(data_path.read_text(encoding="utf-8")).get("exits", [])
+    # Keep what was set on each exit (id, name, enabled, home_only). Exits are matched
+    # by where they end, not by id: ids come from the bearing from the middle of the
+    # starts, which shifts when a start is added.
+    fresh = []
     for ex in exits:
-        if ex["id"] in old:
-            ex["enabled"] = old[ex["id"]].get("enabled", True)
-            ex["home_only"] = old[ex["id"]].get("home_only", False)
-            ex["name"] = old[ex["id"]].get("name", ex["name"])
+        prev = min(old, default=None,
+                   key=lambda o: _haversine_km(tuple(o["end"]), tuple(ex["end"])))
+        if prev is not None and _haversine_km(tuple(prev["end"]), tuple(ex["end"])) <= EXIT_MATCH_KM:
+            for k in ("id", "name", "enabled", "home_only"):
+                ex[k] = prev.get(k, ex[k])
+        else:
+            fresh.append(ex)
     if name_roads:
-        name_exits([e for e in exits if e["id"] not in old])
+        name_exits(fresh)
     town_km = float(cfg.get("town_km", TOWN_KM_DEFAULT))
     data = {"built": time.strftime("%Y-%m-%d"), "rides": len(rides),
             "town_km": round(town_km, 1), "exits": exits,

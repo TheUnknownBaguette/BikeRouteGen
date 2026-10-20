@@ -1,7 +1,7 @@
 {% extends "app.html" %}
 {# A shared plan: the routes travel in the link's #fragment, so nothing is stored
    or sent to the server — share.js decodes it and fills this page in. #}
-{% block title %}windroute — shared routes{% endblock %}
+{% block title %}{{ club.name if club else 'windroute' }} — shared routes{% endblock %}
 {% block panel_label %}Shared routes{% endblock %}
 {% block head_actions %}
   <a class="btn sm primary" href="/">Plan your own</a>
