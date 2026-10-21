@@ -173,6 +173,11 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
         loop_geom=loop_geom,
         club_exits=club.exits_for(club_start) if club is not None else None)
     if club is not None:
+        mine = club.library_candidates(club_start, target_km, tolerance_km)
+        if mine:
+            cands += mine
+            notes.append(f"club routes: {len(mine)} of the club's own routes from here "
+                         f"fit this distance (loops counted both ways round)")
         for c in cands:
             c.club_frac = club.club_frac(c.coords, club_start)
 
@@ -255,6 +260,12 @@ def plan_routes(location, distance, unit="mi", start="now", ride_type="road",
 
     options = engine.select_route_options(ranked, wind, ride_type, target_km,
                                           n_alternatives=n_alternatives)
+    if club is not None and not any(o.candidate.shape == "club route" for o in options):
+        best = next((c for c in ranked if c.shape == "club route"), None)
+        if best is not None:                  # always offer the best of the club's own
+            options.append(engine.RouteOption(
+                best, "alternative", "Club route",
+                engine.scoring._option_reasons(best, wind, ride_type, lead="club")))
     return PlanResult(location_label=label, when=when, wind=wind, zone=zone,
                       ranked=ranked, options=options, notes=notes, surface_mode=mode,
                       region=region, data_confidence=data_confidence,

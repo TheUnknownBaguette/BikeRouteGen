@@ -17,6 +17,17 @@ from xml.sax.saxutils import escape
 
 from .geometry import _bearing, _haversine_km
 
+# Names starting with this mark a stretch with no road name that's still its own
+# stretch (a club route's "Turn right" onto a path): the turn gets a cue, the cue
+# just doesn't name a road.
+UNNAMED = "\x00"
+
+
+def shown(name):
+    """A road name as riders should see it ("" for an unnamed stretch)."""
+    return "" if not name or name.startswith(UNNAMED) else name
+
+
 LOOK_M = 40.0          # bend measured from ~this far before the turn to ~this far after
 MIN_GAP_M = 60.0       # cues closer than this to the previous one are dropped
 BLIP_M = 40.0          # a name that lasts less than this (and returns) is noise
@@ -103,6 +114,7 @@ def make_cues(coords, names):
             if reverses and near_end:
                 continue
         word, ptype = _turn(delta, reverses)
+        new = shown(new)
         if word == "u-turn":
             text = "Turn around" + (f" on {new}" if new else "")
         elif word == "continue":

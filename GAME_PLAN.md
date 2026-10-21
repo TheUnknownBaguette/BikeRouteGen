@@ -33,7 +33,7 @@ time: confirm the open questions with the owner, build, test, then mark the item
 
 - Project: `C:\Users\gcook\OneDrive\Gus' School Folder\Code\claude\BikeRouteGen`; the venv is
   `.venv` (rebuilt on this PC in Oct 2026). `run.bat` rebuilds it on other machines.
-- Tests: `.venv/Scripts/python.exe -m pytest -q` (184 passing as of 2026-10-19, all offline).
+- Tests: `.venv/Scripts/python.exe -m pytest -q` (191 passing as of 2026-10-20, all offline).
 - Local preview from Claude Code: the `webapp-c` entry in the parent folder's
   `.claude/launch.json` (waitress on port 5057). Restart it after Python/template changes.
 - `ORS_API_KEY` is set in the Windows user environment. ORS now lives at
@@ -340,3 +340,4 @@ database), and handling token refresh. Revisit when there's demand.
 | 2026-10-12 | crossing counter | **Fixed.** Shared points / shared stretches only count as a crossing when the second pass goes from one side of the first to the other. Oct 11 ridden route: 11 -> 1 (it lost 0.04 to this). Owner: keep wind scoring and wind-led labels on calm days (a small tailwind still matters) |
 | 2026-10-12 | owner decisions from the review | **Done.** (1) Per-IP limit raised to 30 plans / 5 min (env `RATE_LIMIT_PLANS`) plus a site-wide cap of 1,800 ORS calls per rolling 24 h (env `SITE_ORS_PER_DAY`), which a faked `X-Forwarded-For` can't get around; past it the form says to try later instead of failing. (2) Ride cap 100 -> 250 km (`routing.MAX_RIDE_KM`), checked before any lookup; wind window +16 h. (3) Finished workplans moved to `docs/archive/`. (4) Climb counts ground below sea level (nodata is now exactly 0.0 or < -500 m). Tests: `tests/test_limits_and_climb.py`; 172 passing |
 | 2026-10-19 | 8 club mode | **Built.** Club roads bonus (`w_club` 0.5, in-town share) + `club loop` candidates through the club's exits (found from 69 club rides; 10 exits). Start picker (Neutral Cycle / CBC), "N% club roads" on cards, `cli club-build`. Also: ORS waypoints may snap 1.5 km (corners in farm country were silently failing). `tests/test_club.py`; 184 passing |
+| 2026-10-20 | 8 club mode | Starts CBC / LifeCycle / Alma / BikeLab; official Illinois palette (brand.illinois.edu web colors only; contrast-checked); the club's own 68 routes are candidates ("club route", both ways for loops, best one always offered). Also fixed for both sites: on phones the "more candidates" row stole the top pick on load. 191 passing |

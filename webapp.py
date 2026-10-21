@@ -394,10 +394,14 @@ def plan():
     for i, c in enumerate(order):
         opt = option_of.get(id(c))
         role = opt.role if opt else "candidate"
-        headline = opt.headline if opt else c.shape.capitalize()
+        headline = opt.headline if opt else (c.label or c.shape.capitalize())
+        if opt and c.label and opt.role != "recommended":
+            headline = f"{headline}: {c.label}"           # e.g. "Club route: Homer Lake"
         colors = (club.route_colors if club is not None and club.route_colors
                   else ROUTE_COLORS)
-        color = colors[i] if opt and i < len(colors) else CANDIDATE_COLOR
+        other = (club.candidate_color if club is not None and club.candidate_color
+                 else CANDIDATE_COLOR)
+        color = colors[i] if opt and i < len(colors) else other
         base = OUT_DIR / f"{token}-{i}"
         dist_num = f"{c.distance_km * per_unit:.1f}"
         title = f"{dist_num} {unit} {ride_type} {c.shape} - {headline}"

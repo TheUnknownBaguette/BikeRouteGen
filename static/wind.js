@@ -70,7 +70,14 @@
     var r = hw / mph;                       // cos(angle between travel and wind-from)
     return r > 0.38 ? "head" : r < -0.38 ? "tail" : "cross";
   }
-  var COLORS = { head: "#dc2626", cross: "#d97706", tail: "#16a34a", calm: "#64748b" };
+  // from the page's theme (style.css --wind-*), with the default colors as fallback
+  var css = window.getComputedStyle ? getComputedStyle(document.documentElement) : null;
+  function themed(name, dflt) {
+    var v = css && css.getPropertyValue(name).trim();
+    return v || dflt;
+  }
+  var COLORS = { head: themed("--wind-head", "#dc2626"), cross: themed("--wind-cross", "#d97706"),
+                 tail: themed("--wind-tail", "#16a34a"), calm: themed("--wind-calm", "#64748b") };
   var LABELS = { head: "headwind", cross: "crosswind", tail: "tailwind", calm: "calm" };
   var COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
   function fromDeg(u, v) { return (Math.atan2(u, v) * 180 / Math.PI + 360) % 360; }

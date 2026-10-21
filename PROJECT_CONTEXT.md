@@ -632,9 +632,23 @@ pipeline in a front-end — `plan_routes` is the one place it lives.
     start there; it's "Neutral Cycle" in OSM). Only CBC and BikeLab have club rides of their
     own; the others borrow the nearest start's typical exit paths.
   - Look: `club.json` `theme: illini` puts `data-brand="illini"` on <html>; style.css's last
-    block is a navy theme (Illinois Blue #13294B, Orange #FF5F05; no Block I, it's a
-    University trademark). `route_colors` makes the top pick orange. Header shows the club
-    name and a "<- Club site" link (`website`). The main site has none of this.
+    block uses ONLY official University colors (brand.illinois.edu; web values from
+    web.brand.illinois.edu/stylesheet): Illini Blue #13294B surfaces, white text, Illini
+    Orange #FF5F05 accents with Illini Blue text on orange; il-blue-30/50/70/80 tints for
+    inputs/lines/secondary text; supporting colors only on the map (wind arrows Altgeld /
+    Harvest / Arches via `--wind-*`; routes orange, Arches, blue-70, Harvest; others
+    Storm-60). Orange text only on full Illini Blue (4.8:1; 3.1:1 on blue-30). No Block I
+    (University trademark). Header: club name + "<- Club site" (`website`). Main site
+    unchanged (wind.js / start pin read CSS variables with the old colors as fallback).
+  - **Club routes** (2026-10-20): the club's own route files are candidates too (shape
+    `club route`, `Candidate.label` = cleaned file name, e.g. "St. Joe"; the 15-char TCX
+    names are mangled). `club-build` stores them in `club_data.json` `library`: simplified
+    to 5 m, elevations, and road names per point from the TCX cue sheet (a cue that names
+    no road starts an unnamed stretch, prefixed `cues.UNNAMED`, so it still gets a cue).
+    Offered from the start they begin at (within 0.5 km), when within 25% of the distance;
+    loops both ways round. No ORS calls; scored on wind/distance/turns/tidiness (no
+    busy/poor/surface data; the club vetted them). The best one is always among the
+    options ("Club route: <name>"). In first plans a club route was the top pick.
   - `club-build` keeps each exit's settings by matching where it ENDS (within 1 km), since
     exit ids shift when a start is added. Philo Rd exit is off.
     The form shows a start picker instead of the address search; cards show "N% club roads".

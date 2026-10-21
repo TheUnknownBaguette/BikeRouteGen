@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -27,6 +28,7 @@ from pathlib import Path
 
 import requests
 
+from .cues import UNNAMED
 from .geocode import USER_AGENT
 from .geometry import _bearing, _haversine_km, compass_label
 
@@ -278,6 +280,165 @@ def name_exits(exits, pause_s=1.1):
 
 
 # --------------------------------------------------------------------------- #
+# The route library: the club's own routes, offered as ready-made candidates
+# --------------------------------------------------------------------------- #
+LIBRARY_START_KM = 0.5     # a route belongs to the start it begins this close to
+LIBRARY_DIST_FRAC = 0.25   # offered when within this share of the asked distance
+LIBRARY_THIN_M = 5.0       # route lines are simplified to within this many metres
+LIBRARY_LOOP_KM = 0.3      # start and finish this close -> a loop, ridable both ways
+
+
+def read_course(path) -> dict:
+    """A route file's name, points, elevations and cue sheet
+    ({"name", "coords", "eles", "cues": [(lat, lng, notes)]}). GPX has no cues."""
+    root = ET.parse(path).getroot()
+    tag = lambda el: el.tag.rsplit("}", 1)[-1]
+    # The file name, not the name inside: Ride with GPS cuts a TCX course name to 15
+    # characters and swaps punctuation for dashes ("St--Joe-").
+    name, coords, eles, cues = nice_name(Path(path).stem), [], [], []
+    if tag(root) == "TrainingCenterDatabase":
+        for el in root.iter():
+            t = tag(el)
+            if t == "Trackpoint":
+                vals = {tag(x): x.text for x in el.iter()}
+                if "LatitudeDegrees" in vals:
+                    coords.append((float(vals["LatitudeDegrees"]), float(vals["LongitudeDegrees"])))
+                    eles.append(float(vals.get("AltitudeMeters") or 0.0))
+            elif t == "CoursePoint":
+                vals = {tag(x): x.text for x in el.iter()}
+                if "LatitudeDegrees" in vals:
+                    cues.append((float(vals["LatitudeDegrees"]),
+                                 float(vals["LongitudeDegrees"]), vals.get("Notes") or ""))
+    else:
+        for el in root.iter():
+            if tag(el) in ("trkpt", "rtept"):
+                coords.append((float(el.attrib["lat"]), float(el.attrib["lon"])))
+                ele = next((x.text for x in el if tag(x) == "ele"), None)
+                eles.append(float(ele) if ele else 0.0)
+    return {"name": name, "coords": coords, "eles": eles, "cues": cues}
+
+
+def nice_name(stem):
+    """A route's file name as a title: "Buck_s_Pond (1)" -> "Buck's Pond",
+    "Around_the_Crick-_IC_Fast_Ride" -> "Around the Crick – IC Fast Ride"."""
+    s = re.sub(r"\s*\(\d+\)$", "", stem)                # download copies: "(1)"
+    s = re.sub(r"_s_", "'s ", s).replace("_", " ")
+    s = re.sub(r"\s*-\s+", " – ", s)
+    s = re.sub(r"\s+", " ", s).strip(" -")
+    return s
+
+
+_ONTO = (" onto ", " on ")
+
+
+def _cue_road(notes):
+    """The road a cue turns onto ("Turn left onto S First St" -> "S First St"), or
+    None when it names none ("Turn right", "Turn left toward Savoy")."""
+    for word in _ONTO:
+        if word in notes:
+            return notes.split(word, 1)[1].strip() or None
+    return None
+
+
+def _point_names(coords, cues):
+    """Road name for the stretch leaving each point, from the cue sheet. A turn that
+    names no road starts its own unnamed stretch, so it still gets a cue later."""
+    names = [UNNAMED + "0"] * len(coords)
+    j = 0
+    for k, (lat, lng, notes) in enumerate(cues):
+        if notes.startswith(("Start of route", "End of route")) or not notes.strip():
+            continue
+        window = range(j, min(len(coords), j + 4000))
+        if not window:
+            break
+        i = min(window, key=lambda n: _haversine_km(coords[n], (lat, lng)))
+        if _haversine_km(coords[i], (lat, lng)) > 0.1:
+            continue                              # not on this line: skip it
+        road = _cue_road(notes) or f"{UNNAMED}{k + 1}"
+        for n in range(i, len(coords)):
+            names[n] = road
+        j = i
+    return names
+
+
+def _thin_keep(coords, tol_m=LIBRARY_THIN_M):
+    """Indexes kept when simplifying a line to within `tol_m` (Douglas-Peucker)."""
+    n = len(coords)
+    if n < 3:
+        return list(range(n))
+    lat0 = math.radians(coords[0][0])
+    xy = [(p[1] * 111320.0 * math.cos(lat0), p[0] * 110540.0) for p in coords]
+    keep = [False] * n
+    keep[0] = keep[-1] = True
+    stack = [(0, n - 1)]
+    while stack:
+        a, b = stack.pop()
+        ax, ay = xy[a]
+        dx, dy = xy[b][0] - ax, xy[b][1] - ay
+        seg = dx * dx + dy * dy
+        best, bi = -1.0, -1
+        for i in range(a + 1, b):
+            px, py = xy[i][0] - ax, xy[i][1] - ay
+            t = 0.0 if seg == 0 else max(0.0, min(1.0, (px * dx + py * dy) / seg))
+            d = (px - t * dx) ** 2 + (py - t * dy) ** 2
+            if d > best:
+                best, bi = d, i
+        if bi > 0 and best > tol_m * tol_m:
+            keep[bi] = True
+            stack += [(a, bi), (bi, b)]
+    return [i for i in range(n) if keep[i]]
+
+
+def _expand_names(changes, n):
+    """[[index, name], ...] change points -> one name per point."""
+    names, cur, k = [], "", 0
+    for i in range(n):
+        while k < len(changes) and changes[k][0] <= i:
+            cur = changes[k][1]
+            k += 1
+        names.append(cur)
+    return names
+
+
+def library_routes(routes_dir, starts) -> list:
+    """The club's route files, simplified, each tagged with the start it begins at
+    (routes that start elsewhere are left out). Duplicates are dropped."""
+    out, seen = [], set()
+    for p in sorted(Path(routes_dir).iterdir()):
+        if p.suffix.lower() not in (".tcx", ".gpx"):
+            continue
+        try:
+            r = read_course(p)
+        except (ET.ParseError, ValueError, KeyError):
+            continue
+        co = r["coords"]
+        if len(co) < 2:
+            continue
+        key = (len(co), co[0], co[-1])
+        if key in seen:
+            continue
+        seen.add(key)
+        st = min(starts, key=lambda s: _haversine_km((s["lat"], s["lng"]), co[0]))
+        if _haversine_km((st["lat"], st["lng"]), co[0]) > LIBRARY_START_KM:
+            continue
+        names = _point_names(co, r["cues"])
+        keep = _thin_keep(co)
+        kco = [co[i] for i in keep]
+        knames = [names[i] for i in keep]
+        changes = [[i, nm] for i, nm in enumerate(knames) if i == 0 or nm != knames[i - 1]]
+        has_ele = any(e for e in r["eles"])
+        out.append({
+            "name": r["name"], "file": p.name, "start": st["id"],
+            "km": round(sum(_haversine_km(a, b) for a, b in zip(co, co[1:])), 2),
+            "loop": _haversine_km(co[0], co[-1]) <= LIBRARY_LOOP_KM,
+            "coords": [[round(a, 5), round(b, 5)] for a, b in kco],
+            "eles": [round(r["eles"][i]) for i in keep] if has_ele else [],
+            "names": changes,
+        })
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # The club, as the planner and web app use it
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -293,6 +454,8 @@ class Club:
     website: str = ""                      # the club's own site ("<- Club site" link)
     theme: str = ""                        # style.css theme ([data-brand="..."]), e.g. illini
     route_colors: list = field(default_factory=list)  # top pick + alternatives on the map
+    candidate_color: str = ""              # every other candidate on the map
+    library: list = field(default_factory=list)   # the club's own routes (see library_routes)
 
     def start(self, start_id):
         return next((s for s in self.starts if s["id"] == start_id), None)
@@ -308,6 +471,31 @@ class Club:
                         "home_only": bool(ex.get("home_only")),
                         "waypoints": exit_waypoints(path),
                         "km": sum(_haversine_km(a, b) for a, b in zip(path, path[1:]))})
+        return out
+
+    def library_candidates(self, start_id, target_km, tolerance_km=0.0) -> list:
+        """The club's own routes from this start that suit the distance, as
+        Candidates ("club route"); loops are offered both ways round."""
+        from .models import Candidate
+        from .routing import _reversed_names, _smoothed_ascent
+        slack = max(tolerance_km, LIBRARY_DIST_FRAC * target_km)
+        out = []
+        for r in self.library:
+            if r["start"] != start_id or abs(r["km"] - target_km) > slack:
+                continue
+            coords = [tuple(p) for p in r["coords"]]
+            eles = r.get("eles") or None
+            names = _expand_names(r.get("names", []), len(coords))
+            ways = [(coords, eles, names, r["name"])]
+            if r.get("loop"):
+                ways.append((coords[::-1], eles[::-1] if eles else None,
+                             _reversed_names(names), f"{r['name']} (reversed)"))
+            for co, el, nm, label in ways:
+                out.append(Candidate(
+                    coords=co, distance_km=r["km"],
+                    ascent_m=_smoothed_ascent(el) if el else 0.0,
+                    paved_frac=1.0, unpaved_frac=0.0, shape="club route",
+                    eles=el, road_names=nm, label=label))
         return out
 
     def club_frac(self, coords, start_id) -> float:
@@ -348,7 +536,9 @@ def load(path) -> Club:
                 town_km=float(data.get("town_km", TOWN_KM_DEFAULT)),
                 weight=float(cfg.get("club_road_weight", 0.5)), center=center,
                 embed_on=list(cfg.get("embed_on", [])), website=cfg.get("website", ""),
-                theme=cfg.get("theme", ""), route_colors=list(cfg.get("route_colors", [])))
+                theme=cfg.get("theme", ""), route_colors=list(cfg.get("route_colors", [])),
+                candidate_color=cfg.get("candidate_color", ""),
+                library=data.get("library", []))
 
 
 def build(club_json, name_roads=True) -> dict:
@@ -381,8 +571,9 @@ def build(club_json, name_roads=True) -> dict:
     if name_roads:
         name_exits(fresh)
     town_km = float(cfg.get("town_km", TOWN_KM_DEFAULT))
+    library = library_routes(routes_dir, starts)
     data = {"built": time.strftime("%Y-%m-%d"), "rides": len(rides),
-            "town_km": round(town_km, 1), "exits": exits,
+            "town_km": round(town_km, 1), "exits": exits, "library": library,
             "cells": sorted([list(c) for c in road_cells(rides)])}
     data_path.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
     return data

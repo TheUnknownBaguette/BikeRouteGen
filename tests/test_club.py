@@ -236,3 +236,71 @@ def test_main_site_has_no_club():
     if webapp.CLUB is None:
         page = webapp.app.test_client().get("/").data.decode()
         assert 'id="location"' in page and "club_start" not in page
+
+
+# -- the club's own routes ("club route") -------------------------------------------- #
+def test_route_names_from_file_names():
+    assert club.nice_name("Buck_s_Pond (1)") == "Buck's Pond"
+    assert club.nice_name("Around_the_Crick-_IC_Fast_Ride") == "Around the Crick \u2013 IC Fast Ride"
+    assert club.nice_name("St._Joe_") == "St. Joe"
+
+
+def test_cue_roads_and_unnamed_turns():
+    assert club._cue_road("Turn left onto South First Street") == "South First Street"
+    assert club._cue_road("Turn right") is None
+    assert club._cue_road("Turn left toward Savoy") is None
+    co = _line(START, 90, 3)
+    cues = [(co[50][0], co[50][1], "Turn left onto Main St"),
+            (co[100][0], co[100][1], "Turn right")]
+    names = club._point_names(co, cues)
+    assert names[49] != "Main St" and names[50] == "Main St"
+    assert names[100].startswith(club.UNNAMED)              # its own unnamed stretch
+    from windroute.cues import shown
+    assert shown(names[100]) == "" and shown("Main St") == "Main St"
+
+
+def test_unnamed_turn_still_gets_a_cue():
+    from windroute import cues
+    a = _line(START, 90, 1)
+    b = _line(a[-1], 0, 1)[1:]
+    co = a + b
+    names = ["Main St"] * len(a) + [cues.UNNAMED + "7"] * len(b)
+    got = cues.make_cues(co, names)
+    assert len(got) == 1 and got[0]["text"] == "Turn left" and got[0]["road"] == ""
+
+
+def test_library_candidates_filter_and_reverse():
+    c = _test_club()
+    loop = _line(START, 90, 10) + _line(START, 90, 10)[-2::-1]
+    c.library = [
+        {"name": "Fits", "start": "a", "km": 20.0, "loop": True,
+         "coords": [list(p) for p in loop], "eles": [], "names": [[0, "Main St"]]},
+        {"name": "Too long", "start": "a", "km": 60.0, "loop": True,
+         "coords": [list(p) for p in loop], "eles": [], "names": []},
+        {"name": "Other start", "start": "b", "km": 20.0, "loop": False,
+         "coords": [list(p) for p in loop], "eles": [], "names": []},
+    ]
+    got = c.library_candidates("a", 20.0, 3.0)
+    assert [x.label for x in got] == ["Fits", "Fits (reversed)"]
+    assert all(x.shape == "club route" for x in got)
+    assert got[1].coords == got[0].coords[::-1]
+
+
+def test_planner_always_offers_a_club_route(monkeypatch):
+    def fake_generate(lat, lng, target_km, ride_type, api_key, **kw):
+        co = _line((lat, lng), 0, 8) + _line((lat, lng), 0, 8)[-2::-1]
+        return [Candidate(coords=co, distance_km=16, ascent_m=0, paved_frac=1,
+                          unpaved_frac=0, shape="loop")]
+
+    monkeypatch.setattr(planner.engine, "generate_candidates", fake_generate)
+    monkeypatch.setattr(planner.engine, "get_wind",
+                        lambda *a, **k: Wind(180, 8, 10, "2026-10-19T08:00"))
+    c = _test_club()
+    loop = _line(START, 270, 8) + _line(START, 270, 8)[-2::-1]
+    c.library = [{"name": "Classic", "start": "a", "km": 16.0, "loop": False,
+                  "coords": [list(p) for p in loop], "eles": [], "names": []}]
+    r = planner.plan_routes("ignored", 10, club=c, club_start="a", api_key="k",
+                            fast_roads=False, corrections=False)
+    labels = [o.candidate.label for o in r.options]
+    assert "Classic" in labels
+    assert any("club's own route: Classic" in x for o in r.options for x in o.reasons)

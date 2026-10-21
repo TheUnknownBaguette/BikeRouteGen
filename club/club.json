@@ -46,8 +46,9 @@
   "theme": "illini",
   "route_colors": [
     "#FF5F05",
-    "#7fb2ff",
-    "#2dd4bf",
-    "#e879f9"
-  ]
+    "#009FD4",
+    "#98AFD2",
+    "#FCB316"
+  ],
+  "candidate_color": "#8E9090"
 }

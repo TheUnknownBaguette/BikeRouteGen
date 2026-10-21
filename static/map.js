@@ -415,8 +415,12 @@
     // phones: the card lists are swipeable carousels — the card you settle on is selected
     if ("IntersectionObserver" in window) {
       document.querySelectorAll(".routes.carousel").forEach(function (track) {
+        // only once the rider swipes this row: on load every row reports its first
+        // card in view, and the "more candidates" row would steal the top pick
+        var swiped = false;
+        track.addEventListener("scroll", function () { swiped = true; }, { passive: true });
         var io = new IntersectionObserver(function (entries) {
-          if (!mobile.matches) return;
+          if (!mobile.matches || !swiped) return;
           entries.forEach(function (en) {
             if (en.isIntersecting && en.intersectionRatio > 0.75) {
               var id = +en.target.getAttribute("data-route");

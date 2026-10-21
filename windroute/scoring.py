@@ -654,7 +654,12 @@ def _option_reasons(c: Candidate, wind: Wind, ride_type: str, lead: str = None):
     """Human bullet points for an option: the axis it leads on first, then a few
     short supporting facts (skipping whichever axis we just led with). Pure text."""
     reasons = []
-    if lead == "wind":
+    if c.label:
+        reasons.append(f"the club's own route: {c.label}")
+    if lead == "club":
+        reasons.append(f"best of the club's routes today - {wind_summary(c)}"
+                       if wind.known else "best of the club's routes for this distance")
+    elif lead == "wind":
         reasons.append(f"strongest wind line - {wind_summary(c)} "
                        f"(wind score {c.wind_score:+.2f})")
     elif lead == "quiet":
